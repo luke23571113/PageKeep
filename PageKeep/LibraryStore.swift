@@ -56,6 +56,9 @@ final class LibraryStore {
         }
     }
 
+    var activeNotebooks: [Notebook] { notebooks.filter { !$0.isArchived } }
+    var archivedNotebooks: [Notebook] { notebooks.filter(\.isArchived) }
+
     func notebook(id: UUID) -> Notebook? {
         notebooks.first { $0.id == id }
     }
@@ -64,23 +67,49 @@ final class LibraryStore {
         repository.pdfURL(for: notebook)
     }
 
-    func savePrepared(
-        _ prepared: PreparedPDF,
-        name: String,
-        notebookID: UUID?
-    ) async throws -> UUID {
+    func saveNotebook(
+        details: NotebookDetails,
+        notebookID: UUID?,
+        additions: [PreparedPDF],
+        pageLayout: [DraftPage]? = nil,
+        expectedExistingPageIDs: [UUID]? = nil
+    ) async throws -> SavedNotebook {
         let id = notebookID ?? UUID()
         try await perform {
             if notebookID != nil {
-                return try await repository.append(to: id, from: prepared)
+                return try await repository.edit(
+                    id, details: details, appending: additions, pageLayout: pageLayout,
+                    expectedExistingPageIDs: expectedExistingPageIDs
+                )
             }
-            return try await repository.create(id: id, name: name, from: prepared)
+            return try await repository.create(id: id, details: details, from: additions, pageLayout: pageLayout)
         }
-        return id
+        let addedCount = additions.reduce(0) { $0 + $1.pageCount }
+        var firstAddedPageID: UUID?
+        if let pageLayout {
+            firstAddedPageID = pageLayout.first {
+                if case .prepared = $0.source { return true }
+                return false
+            }?.id
+        } else if addedCount > 0, let saved = notebook(id: id) {
+            firstAddedPageID = saved.pages[saved.pageCount - addedCount].id
+        }
+        return SavedNotebook(notebookID: id, firstAddedPageID: firstAddedPageID)
     }
 
-    func rename(_ id: UUID, to name: String) async throws {
-        try await perform { try await repository.rename(id, to: name) }
+    func reorderNotebooks(orderedActiveIDs: [UUID]) async throws {
+        try await perform { try await repository.reorderNotebooks(orderedActiveIDs: orderedActiveIDs) }
+    }
+
+    func setArchived(_ archived: Bool, ids: Set<UUID>) async throws {
+        try await perform { try await repository.setArchived(archived, ids: ids) }
+    }
+
+    func appendPrepared(_ prepared: PreparedPDF, to notebookID: UUID) async throws -> SavedNotebook {
+        let existingCount = notebook(id: notebookID)?.pageCount ?? 0
+        try await perform { try await repository.append(to: notebookID, from: prepared) }
+        let firstAddedPageID = notebook(id: notebookID)?.pages.dropFirst(existingCount).first?.id
+        return SavedNotebook(notebookID: notebookID, firstAddedPageID: firstAddedPageID)
     }
 
     func deleteNotebook(_ id: UUID) async throws {
@@ -116,12 +145,7 @@ final class LibraryStore {
     }
 
     private func update(_ snapshot: LibrarySnapshot) {
-        notebooks = snapshot.manifest.notebooks.sorted {
-            if $0.modifiedAt != $1.modifiedAt {
-                return $0.modifiedAt > $1.modifiedAt
-            }
-            return $0.id.uuidString < $1.id.uuidString
-        }
+        notebooks = snapshot.manifest.notebooks
         notebookErrors = snapshot.notebookErrors
     }
 }

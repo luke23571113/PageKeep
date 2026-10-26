@@ -1,6 +1,5 @@
 import Foundation
 import PDFKit
-import Darwin
 
 actor LibraryRepository {
     enum Checkpoint: Sendable {
@@ -22,12 +21,14 @@ actor LibraryRepository {
     private let startedAt = Date()
     private var manifest: LibraryManifest?
     private let fileManager = FileManager.default
+    private let files: LibraryFiles
 
     init(
         rootURL: URL = LibraryRepository.defaultApplicationSupportRoot,
         failureInjector: (@Sendable (Checkpoint) throws -> Void)? = nil
     ) {
         self.rootURL = rootURL
+        files = LibraryFiles(rootURL: rootURL)
         self.failureInjector = failureInjector
     }
 
@@ -42,7 +43,7 @@ actor LibraryRepository {
         if !fileManager.fileExists(atPath: rootURL.path) {
             try installInitialLibrary()
         }
-        let current = try readManifest(at: currentURL)
+        let current = try files.readManifest(at: files.currentURL)
         // A future backup may belong to a newer app as well. Leave the store untouched.
         let backup = try validatedBackupIfPresent()
         manifest = current
@@ -50,18 +51,18 @@ actor LibraryRepository {
         TemporaryPDFCleanup.cleanOnce(before: startedAt)
         let backupHasErrors = backup.map { !self.snapshot(for: $0).notebookErrors.isEmpty } ?? false
         if snapshot.notebookErrors.isEmpty, !backupHasErrors,
-           backup != nil || !fileManager.fileExists(atPath: backupURL.path) {
+           backup != nil || !fileManager.fileExists(atPath: files.backupURL.path) {
             cleanUnusedPDFs(current: current, backup: backup)
         }
         return snapshot
     }
 
     func canRecover() -> Bool {
-        guard fileManager.fileExists(atPath: currentURL.path) else {
+        guard fileManager.fileExists(atPath: files.currentURL.path) else {
             return completeBackup() != nil
         }
         do {
-            _ = try readManifest(at: currentURL)
+            _ = try files.readManifest(at: files.currentURL)
             return false
         } catch LibraryError.newerSchema {
             return false
@@ -74,9 +75,9 @@ actor LibraryRepository {
         guard canRecover(), let recovered = completeBackup() else {
             throw LibraryError.recoveryUnavailable
         }
-        let data = try encode(recovered)
+        let data = try Data(contentsOf: files.backupURL)
         try Task.checkCancellation()
-        try atomicWrite(data, to: currentURL)
+        try files.atomicWrite(data, to: files.currentURL)
         manifest = recovered
         return snapshot(for: recovered)
     }
@@ -89,7 +90,7 @@ actor LibraryRepository {
         let url = try PDFService.makeStagingURL()
         do {
             try Task.checkCancellation()
-            try coordinatedCopy(from: sourceURL, to: url)
+            try files.coordinatedCopy(from: sourceURL, to: url)
             let document = try PDFService.validate(at: url)
             try Task.checkCancellation()
             return PreparedPDF(
@@ -107,46 +108,126 @@ actor LibraryRepository {
         PDFService.discard(prepared)
     }
 
-    func create(id: UUID, name: String, from prepared: PreparedPDF) throws -> LibrarySnapshot {
+    func create(
+        id: UUID, details: NotebookDetails, from additions: [PreparedPDF], pageLayout: [DraftPage]? = nil
+    ) throws -> LibrarySnapshot {
         var next = try loadedManifest()
         guard !next.notebooks.contains(where: { $0.id == id }) else { throw LibraryError.invalidChange }
-        let document = try preparedDocument(prepared)
+        guard !additions.isEmpty else { throw PDFError.emptyDocument }
+        let name = try NotebookNaming.resolvedName(details.name, in: next.notebooks)
+        let documents = try additions.map { try preparedDocument($0) }
         let date = Date()
         var notebook = Notebook(
-            id: id,
-            name: try validName(name),
-            createdAt: date,
-            modifiedAt: date,
-            revisionID: nil,
-            pages: (0..<document.pageCount).map { _ in NotebookPage() }
+            id: id, name: name, createdAt: date, modifiedAt: date,
+            revisionID: nil, pages: [], symbolName: details.symbolName, colorID: details.colorID
         )
-        notebook.revisionID = try saveCandidateCopy(from: prepared.url)
-        next.notebooks.append(notebook)
+        if let pageLayout {
+            guard !pageLayout.isEmpty else { throw PDFError.emptyDocument }
+            let combined = try PDFPageComposition.arrangedDocument(pageLayout, existingNotebook: nil, existingDocument: nil, additions: additions, documents: documents)
+            notebook.pages = pageLayout.map { NotebookPage(id: $0.id) }
+            try updatePDF(combined, notebook: &notebook)
+        } else if let single = additions.first, additions.count == 1 {
+            notebook.pages = (0..<single.pageCount).map { _ in NotebookPage() }
+            notebook.revisionID = try saveCandidateCopy(from: single.url)
+        } else if !documents.isEmpty {
+            let combined = PDFDocument()
+            combined.documentAttributes = documents.first?.documentAttributes
+            try PDFPageComposition.append(documents, to: combined, notebook: &notebook)
+            try updatePDF(combined, notebook: &notebook)
+        }
+        next.notebooks.insert(notebook, at: 0)
         return try commit(next)
+    }
+
+    func edit(
+        _ id: UUID, details: NotebookDetails, appending additions: [PreparedPDF],
+        pageLayout: [DraftPage]? = nil, expectedExistingPageIDs: [UUID]? = nil
+    ) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        let index = try notebookIndex(id, in: next)
+        let name = try NotebookNaming.resolvedName(details.name, in: next.notebooks, excluding: id)
+        let original = next.notebooks[index]
+        if pageLayout != nil, let expectedExistingPageIDs, expectedExistingPageIDs != original.pages.map(\.id) {
+            throw LibraryError.invalidChange
+        }
+        next.notebooks[index].name = name
+        next.notebooks[index].symbolName = details.symbolName
+        next.notebooks[index].colorID = details.colorID
+        if let pageLayout {
+            let documents = try additions.map { try preparedDocument($0) }
+            let arranged = try PDFPageComposition.arrangedDocument(pageLayout, existingNotebook: original, existingDocument: document(for: original), additions: additions, documents: documents)
+            let originalLayout = original.pages.map { DraftPage(id: $0.id, source: .existing($0.id)) }
+            if pageLayout != originalLayout {
+                next.notebooks[index].pages = pageLayout.map { NotebookPage(id: $0.id) }
+                try updatePDF(arranged, notebook: &next.notebooks[index])
+            } else {
+                guard original != next.notebooks[index] else { return snapshot(for: next) }
+                next.notebooks[index].modifiedAt = Date()
+            }
+        } else if !additions.isEmpty {
+            // Validate every batch before creating a candidate or changing the manifest.
+            let documents = try additions.map { try preparedDocument($0) }
+            let document = try document(for: original)
+            try PDFPageComposition.append(documents, to: document, notebook: &next.notebooks[index])
+            try updatePDF(document, notebook: &next.notebooks[index])
+        } else {
+            guard original != next.notebooks[index] else { return snapshot(for: next) }
+            next.notebooks[index].modifiedAt = Date()
+        }
+        return try commit(next)
+    }
+
+    func reorderNotebooks(orderedActiveIDs: [UUID]) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        let active = next.notebooks.filter { !$0.isArchived }
+        guard orderedActiveIDs.count == active.count,
+              Set(orderedActiveIDs).count == orderedActiveIDs.count,
+              Set(orderedActiveIDs) == Set(active.map(\.id)) else { throw LibraryError.invalidChange }
+        guard orderedActiveIDs != active.map(\.id) else { return snapshot(for: next) }
+        let byID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
+        var position = 0
+        for index in next.notebooks.indices where !next.notebooks[index].isArchived {
+            guard let notebook = byID[orderedActiveIDs[position]] else { throw LibraryError.invalidChange }
+            next.notebooks[index] = notebook
+            position += 1
+        }
+        return try commit(next)
+    }
+
+    func setArchived(_ archived: Bool, ids: Set<UUID>) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        guard ids.isSubset(of: Set(next.notebooks.map(\.id))) else { throw LibraryError.invalidChange }
+        var changed = false
+        for index in next.notebooks.indices where ids.contains(next.notebooks[index].id) {
+            if next.notebooks[index].isArchived != archived {
+                next.notebooks[index].isArchived = archived
+                next.notebooks[index].modifiedAt = Date()
+                changed = true
+            }
+        }
+        guard changed else { return snapshot(for: next) }
+        return try commit(next)
+    }
+
+    func create(id: UUID, name: String, from prepared: PreparedPDF) throws -> LibrarySnapshot {
+        try create(id: id, details: NotebookDetails(name: name), from: [prepared])
     }
 
     func append(to id: UUID, from prepared: PreparedPDF) throws -> LibrarySnapshot {
         var next = try loadedManifest()
         let index = try notebookIndex(id, in: next)
-        let document = try document(for: next.notebooks[index])
         let incoming = try preparedDocument(prepared)
-        for pageIndex in 0..<incoming.pageCount {
-            guard let page = incoming.page(at: pageIndex)?.copy() as? PDFPage else { throw PDFError.invalidDocument }
-            document.insert(page, at: document.pageCount)
-            next.notebooks[index].pages.append(NotebookPage())
-        }
+        let document = try document(for: next.notebooks[index])
+        try PDFPageComposition.append([incoming], to: document, notebook: &next.notebooks[index])
         try updatePDF(document, notebook: &next.notebooks[index])
         return try commit(next)
     }
 
     func rename(_ id: UUID, to name: String) throws -> LibrarySnapshot {
-        var next = try loadedManifest()
-        let index = try notebookIndex(id, in: next)
-        let name = try validName(name)
-        guard next.notebooks[index].name != name else { return snapshot(for: next) }
-        next.notebooks[index].name = name
-        next.notebooks[index].modifiedAt = Date()
-        return try commit(next)
+        let current = try loadedManifest()
+        var details = current.notebooks[try notebookIndex(id, in: current)].details
+        details.name = name
+        return try edit(id, details: details, appending: [])
     }
 
     func deleteNotebook(_ id: UUID) throws -> LibrarySnapshot {
@@ -169,8 +250,10 @@ actor LibraryRepository {
         let source = try document(for: notebook)
         let reordered = PDFDocument()
         reordered.documentAttributes = source.documentAttributes
+        let indices = Dictionary(uniqueKeysWithValues: notebook.pages.enumerated().map { ($0.element.id, $0.offset) })
         for pageID in orderedIDs {
-            guard let oldIndex = notebook.pages.firstIndex(where: { $0.id == pageID }),
+            try Task.checkCancellation()
+            guard let oldIndex = indices[pageID],
                   let page = source.page(at: oldIndex)?.copy() as? PDFPage else { throw PDFError.invalidDocument }
             reordered.insert(page, at: reordered.pageCount)
         }
@@ -218,7 +301,7 @@ actor LibraryRepository {
         let folder = fileManager.temporaryDirectory.appendingPathComponent("PageKeep-Share", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-        let destination = folder.appendingPathComponent(shareFileName(notebook.name)).appendingPathExtension("pdf")
+        let destination = folder.appendingPathComponent(files.shareFileName(notebook.name)).appendingPathExtension("pdf")
         do {
             try Task.checkCancellation()
             try fileManager.copyItem(at: source, to: destination)
@@ -229,52 +312,21 @@ actor LibraryRepository {
         }
     }
 
-    private var currentURL: URL { rootURL.appendingPathComponent("manifest.json") }
-    private var backupURL: URL { rootURL.appendingPathComponent("manifest.backup.json") }
-    private var pdfFolder: URL { rootURL.appendingPathComponent("PDFs", isDirectory: true) }
-
     private func loadedManifest() throws -> LibraryManifest {
         if manifest == nil { _ = try load() }
         guard let manifest else { throw LibraryError.damagedManifest }
         return manifest
     }
 
-    private func readManifest(at url: URL) throws -> LibraryManifest {
-        let data: Data
-        do { data = try Data(contentsOf: url) } catch { throw LibraryError.damagedManifest }
-        // Read the version separately so a newer format is never mistaken for corruption.
-        struct Version: Decodable { let schemaVersion: Int }
-        if let version = try? JSONDecoder().decode(Version.self, from: data), version.schemaVersion > 1 {
-            throw LibraryError.newerSchema
-        }
-        guard let decoded = try? JSONDecoder().decode(LibraryManifest.self, from: data),
-              decoded.schemaVersion == 1, decoded.initialized else { throw LibraryError.damagedManifest }
-        guard Set(decoded.notebooks.map(\.id)).count == decoded.notebooks.count else {
-            throw LibraryError.damagedManifest
-        }
-        var revisions = Set<UUID>()
-        for notebook in decoded.notebooks {
-            guard !notebook.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  Set(notebook.pages.map(\.id)).count == notebook.pages.count,
-                  notebook.pages.isEmpty == (notebook.revisionID == nil) else {
-                throw LibraryError.damagedManifest
-            }
-            if let revision = notebook.revisionID, !revisions.insert(revision).inserted {
-                throw LibraryError.damagedManifest
-            }
-        }
-        return decoded
-    }
-
     private func validatedBackupIfPresent() throws -> LibraryManifest? {
-        guard fileManager.fileExists(atPath: backupURL.path) else { return nil }
-        do { return try readManifest(at: backupURL) }
+        guard fileManager.fileExists(atPath: files.backupURL.path) else { return nil }
+        do { return try files.readManifest(at: files.backupURL) }
         catch LibraryError.newerSchema { throw LibraryError.newerSchema }
         catch { return nil }
     }
 
     private func completeBackup() -> LibraryManifest? {
-        guard let backup = try? readManifest(at: backupURL), snapshot(for: backup).notebookErrors.isEmpty else { return nil }
+        guard let backup = try? files.readManifest(at: files.backupURL), snapshot(for: backup).notebookErrors.isEmpty else { return nil }
         return backup
     }
 
@@ -308,23 +360,6 @@ actor LibraryRepository {
         return index
     }
 
-    private func validName(_ name: String) throws -> String {
-        let result = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !result.isEmpty else { throw LibraryError.emptyName }
-        return result
-    }
-
-    private func shareFileName(_ name: String) -> String {
-        let sanitized = name.components(separatedBy: CharacterSet(charactersIn: "/:\\").union(.controlCharacters))
-            .joined(separator: "-")
-        var result = ""
-        for character in sanitized {
-            guard result.utf8.count + String(character).utf8.count <= 180 else { break }
-            result.append(character)
-        }
-        return result.isEmpty ? "Notebook" : result
-    }
-
     private func validateSelection(_ ids: Set<UUID>, notebook: Notebook) throws {
         guard ids.isSubset(of: Set(notebook.pages.map(\.id))) else { throw LibraryError.invalidChange }
     }
@@ -334,29 +369,16 @@ actor LibraryRepository {
         notebook.modifiedAt = Date()
     }
 
-    private func coordinatedCopy(from source: URL, to destination: URL) throws {
-        let coordinator = NSFileCoordinator()
-        var coordinationError: NSError?
-        var copyError: Error?
-        coordinator.coordinate(readingItemAt: source, options: .withoutChanges, error: &coordinationError) { readableURL in
-            do { try fileManager.copyItem(at: readableURL, to: destination) }
-            catch { copyError = error }
-        }
-        if let coordinationError { throw coordinationError }
-        if let copyError { throw copyError }
-        guard fileManager.fileExists(atPath: destination.path) else { throw PDFError.invalidDocument }
-    }
-
     private func saveCandidateCopy(from source: URL) throws -> UUID {
         try Task.checkCancellation()
         let revision = UUID()
-        let temporary = pdfFolder.appendingPathComponent("\(revision.uuidString).pending")
-        let destination = pdfFolder.appendingPathComponent("\(revision.uuidString).pdf")
+        let temporary = files.pdfFolder.appendingPathComponent("\(revision.uuidString).pending")
+        let destination = files.pdfFolder.appendingPathComponent("\(revision.uuidString).pdf")
         do {
             try fileManager.copyItem(at: source, to: temporary)
             _ = try PDFService.validate(at: temporary)
             try Task.checkCancellation()
-            try moveAtomically(from: temporary, to: destination)
+            try files.moveAtomically(from: temporary, to: destination)
             try failureInjector?(.afterCandidatePDF)
             return revision
         } catch {
@@ -368,12 +390,12 @@ actor LibraryRepository {
     private func saveCandidate(_ document: PDFDocument) throws -> UUID {
         try Task.checkCancellation()
         let revision = UUID()
-        let temporary = pdfFolder.appendingPathComponent("\(revision.uuidString).pending")
-        let destination = pdfFolder.appendingPathComponent("\(revision.uuidString).pdf")
+        let temporary = files.pdfFolder.appendingPathComponent("\(revision.uuidString).pending")
+        let destination = files.pdfFolder.appendingPathComponent("\(revision.uuidString).pdf")
         do {
             try PDFService.write(document, to: temporary)
             try Task.checkCancellation()
-            try moveAtomically(from: temporary, to: destination)
+            try files.moveAtomically(from: temporary, to: destination)
             try failureInjector?(.afterCandidatePDF)
             return revision
         } catch {
@@ -383,45 +405,18 @@ actor LibraryRepository {
     }
 
     private func commit(_ next: LibraryManifest) throws -> LibrarySnapshot {
-        let data = try encode(next)
-        let previous = try Data(contentsOf: currentURL)
+        let data = try files.encode(next)
+        let previous = try Data(contentsOf: files.currentURL)
         try failureInjector?(.beforeBackup)
         try Task.checkCancellation()
-        try atomicWrite(previous, to: backupURL)
+        try files.atomicWrite(previous, to: files.backupURL)
         try failureInjector?(.afterBackup)
         try failureInjector?(.beforeManifestCommit)
         try Task.checkCancellation()
-        try atomicWrite(data, to: currentURL)
+        try files.atomicWrite(data, to: files.currentURL)
         // Nothing after the atomic commit may turn a successful save into a reported failure.
         manifest = next
         return snapshot(for: next)
-    }
-
-    private func encode(_ manifest: LibraryManifest) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(manifest)
-    }
-
-    private func atomicWrite(_ data: Data, to destination: URL) throws {
-        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).pending")
-        do {
-            try data.write(to: temporary)
-            try Task.checkCancellation()
-            try moveAtomically(from: temporary, to: destination)
-        } catch {
-            try? fileManager.removeItem(at: temporary)
-            throw error
-        }
-    }
-
-    private func moveAtomically(from source: URL, to destination: URL) throws {
-        let result = source.withUnsafeFileSystemRepresentation { sourcePath in
-            destination.withUnsafeFileSystemRepresentation { destinationPath in
-                Darwin.rename(sourcePath!, destinationPath!)
-            }
-        }
-        guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 
     private func installInitialLibrary() throws {
@@ -438,12 +433,12 @@ actor LibraryRepository {
                 id: UUID(), name: "Welcome to PageKeep", createdAt: date, modifiedAt: date,
                 revisionID: revision, pages: (0..<3).map { _ in NotebookPage() }
             )
-            let initial = try encode(LibraryManifest(notebooks: [sample]))
+            let initial = try files.encode(LibraryManifest(notebooks: [sample]))
             try initial.write(to: staging.appendingPathComponent("manifest.json"))
             try initial.write(to: staging.appendingPathComponent("manifest.backup.json"))
             try failureInjector?(.beforeInitialInstall)
             try Task.checkCancellation()
-            try moveAtomically(from: staging, to: rootURL)
+            try files.moveAtomically(from: staging, to: rootURL)
         } catch {
             try? fileManager.removeItem(at: staging)
             throw error
@@ -452,7 +447,7 @@ actor LibraryRepository {
 
     private func cleanUnusedPDFs(current: LibraryManifest, backup: LibraryManifest?) {
         let referenced = Set((current.notebooks + (backup?.notebooks ?? [])).compactMap(\.revisionID).map { "\($0.uuidString).pdf" })
-        guard let files = try? fileManager.contentsOfDirectory(at: pdfFolder, includingPropertiesForKeys: nil) else { return }
+        guard let files = try? fileManager.contentsOfDirectory(at: files.pdfFolder, includingPropertiesForKeys: nil) else { return }
         for file in files where !referenced.contains(file.lastPathComponent) {
             if file.pathExtension == "pdf" || file.pathExtension == "pending" {
                 try? fileManager.removeItem(at: file)
@@ -461,7 +456,7 @@ actor LibraryRepository {
     }
 }
 
-private enum TemporaryPDFCleanup {
+enum TemporaryPDFCleanup {
     static let lock = NSLock()
     static var didClean = false
 

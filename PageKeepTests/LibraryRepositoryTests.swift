@@ -364,6 +364,413 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path), "Import preparation must not initialize the library")
     }
 
+    func testV1MigrationPreservesNamesIDsPDFsAndOldVisibleOrderWithoutWriting() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        var original = try XCTUnwrap(initial.manifest.notebooks.first)
+        original.modifiedAt = Date(timeIntervalSince1970: 100)
+        let earlierID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let laterID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let date = Date(timeIntervalSince1970: 200)
+        let earlier = Notebook(id: earlierID, name: "Duplicate", createdAt: date, modifiedAt: date, revisionID: nil, pages: [])
+        let later = Notebook(id: laterID, name: "Duplicate", createdAt: date, modifiedAt: date, revisionID: nil, pages: [])
+        let bytes = try legacyManifest([original, later, earlier])
+        let currentURL = root.appendingPathComponent("manifest.json")
+        try bytes.write(to: currentURL)
+        let migrated = try await repository.load()
+        XCTAssertEqual(migrated.manifest.schemaVersion, 2)
+        XCTAssertEqual(migrated.manifest.notebooks.map(\.id), [earlierID, laterID, original.id])
+        XCTAssertEqual(migrated.manifest.notebooks.map(\.name), ["Duplicate", "Duplicate", original.name])
+        XCTAssertTrue(migrated.manifest.notebooks.allSatisfy { $0.symbolName == "book.closed" && $0.colorID == "default" && !$0.isArchived })
+        XCTAssertEqual(migrated.manifest.notebooks.last, original)
+        XCTAssertTrue(migrated.notebookErrors.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: currentURL), bytes)
+        _ = try await repository.setArchived(true, ids: [earlierID])
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("manifest.backup.json")), bytes)
+        let reloaded = try await LibraryRepository(rootURL: root).load()
+        XCTAssertTrue(reloaded.manifest.notebooks[0].isArchived)
+        let persisted = try JSONSerialization.jsonObject(with: Data(contentsOf: currentURL)) as? [String: Any]
+        XCTAssertEqual(persisted?["schemaVersion"] as? Int, 2)
+    }
+
+    func testV1BackupRecoveryKeepsRawBackupAndMigratesOnNextMutation() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let bytes = try legacyManifest(initial.manifest.notebooks)
+        let backupURL = root.appendingPathComponent("manifest.backup.json")
+        let currentURL = root.appendingPathComponent("manifest.json")
+        try bytes.write(to: backupURL)
+        try Data("damaged".utf8).write(to: currentURL)
+        let recovered = try await repository.recover()
+        XCTAssertEqual(recovered.manifest.notebooks, initial.manifest.notebooks)
+        XCTAssertEqual(try Data(contentsOf: backupURL), bytes)
+        XCTAssertEqual(try Data(contentsOf: currentURL), bytes)
+        _ = try await repository.rename(initial.manifest.notebooks[0].id, to: "Recovered")
+        XCTAssertEqual(try Data(contentsOf: backupURL), bytes)
+        let reloaded = try await LibraryRepository(rootURL: root).load()
+        XCTAssertEqual(reloaded.manifest.notebooks[0].name, "Recovered")
+    }
+
+    func testV1MissingPDFKeepsManifestAndReportsError() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let original = initial.manifest.notebooks[0]
+        let bytes = try legacyManifest([original])
+        let url = root.appendingPathComponent("manifest.json")
+        try bytes.write(to: url)
+        try FileManager.default.removeItem(at: XCTUnwrap(repository.pdfURL(for: original)))
+        let migrated = try await repository.load()
+        XCTAssertNotNil(migrated.notebookErrors[original.id])
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+
+    func testV2RequiresAppearanceAndArchiveFieldsAndProtectsFutureBackup() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        _ = try await repository.load()
+        let url = root.appendingPathComponent("manifest.json")
+        let bytes = try Data(contentsOf: url)
+        for field in ["symbolName", "colorID", "isArchived"] {
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+            var notebooks = try XCTUnwrap(json["notebooks"] as? [[String: Any]])
+            notebooks[0].removeValue(forKey: field)
+            json["notebooks"] = notebooks
+            try JSONSerialization.data(withJSONObject: json).write(to: url)
+            do { _ = try await repository.load(); XCTFail("Missing V2 field should fail: \(field)") }
+            catch LibraryError.damagedManifest { }
+        }
+        try bytes.write(to: url)
+        try Data("{\"schemaVersion\":99}".utf8).write(to: root.appendingPathComponent("manifest.backup.json"))
+        do { _ = try await repository.load(); XCTFail("Expected newer backup schema rejection") }
+        catch LibraryError.newerSchema { }
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+
+    func testOrderArchiveAndMetadataPersistWithoutRewritingPDF() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let sample = initial.manifest.notebooks[0]
+        let originalBytes = try Data(contentsOf: XCTUnwrap(repository.pdfURL(for: sample)))
+        let prepared = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(prepared) }
+        let firstID = UUID()
+        let secondID = UUID()
+        _ = try await repository.create(id: firstID, details: NotebookDetails(name: "First"), from: [prepared])
+        _ = try await repository.create(id: secondID, details: NotebookDetails(name: "Second"), from: [prepared])
+        _ = try await repository.setArchived(true, ids: [firstID])
+        let reordered = try await repository.reorderNotebooks(orderedActiveIDs: [sample.id, secondID])
+        XCTAssertEqual(reordered.manifest.notebooks.map(\.id), [sample.id, firstID, secondID])
+        _ = try await repository.edit(sample.id, details: NotebookDetails(name: "Notes", symbolName: "pencil", colorID: "blue"), appending: [])
+        _ = try await repository.setArchived(false, ids: [firstID])
+        let reloaded = try await LibraryRepository(rootURL: root).load()
+        XCTAssertEqual(reloaded.manifest.notebooks.map(\.id), [sample.id, firstID, secondID])
+        let edited = reloaded.manifest.notebooks[0]
+        XCTAssertEqual(edited.symbolName, "pencil")
+        XCTAssertEqual(edited.colorID, "blue")
+        XCTAssertEqual(edited.revisionID, sample.revisionID)
+        XCTAssertEqual(edited.pages, sample.pages)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(repository.pdfURL(for: edited))), originalBytes)
+    }
+
+    func testMetadataFailuresAndInvalidOrdersKeepSavedLibrary() async throws {
+        let initialRepository = LibraryRepository(rootURL: root)
+        let initial = try await initialRepository.load()
+        let sample = initial.manifest.notebooks[0]
+        let repository = LibraryRepository(rootURL: root) { checkpoint in
+            if case .beforeManifestCommit = checkpoint { throw TestFailure.injected }
+        }
+        do { _ = try await repository.setArchived(true, ids: [sample.id]); XCTFail("Expected failure") }
+        catch TestFailure.injected { }
+        do { _ = try await repository.edit(sample.id, details: NotebookDetails(name: "Changed", colorID: "red"), appending: []); XCTFail("Expected failure") }
+        catch TestFailure.injected { }
+        for order in [[], [sample.id, sample.id], [UUID()]] {
+            do { _ = try await repository.reorderNotebooks(orderedActiveIDs: order); XCTFail("Expected invalid order") }
+            catch LibraryError.invalidChange { }
+        }
+        let reloaded = try await LibraryRepository(rootURL: root).load()
+        XCTAssertEqual(reloaded.manifest.notebooks, initial.manifest.notebooks)
+    }
+
+    func testSerializedCreateAndEditResolveNamesIncludingArchive() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        _ = try await repository.load()
+        let prepared = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(prepared) }
+        let ids = [UUID(), UUID(), UUID()]
+        _ = try await repository.create(id: ids[0], details: NotebookDetails(name: "  Math  "), from: [prepared])
+        _ = try await repository.setArchived(true, ids: [ids[0]])
+        _ = try await repository.create(id: ids[1], details: NotebookDetails(name: "math"), from: [prepared])
+        let created = try await repository.create(id: ids[2], details: NotebookDetails(name: "Math (1)"), from: [prepared])
+        XCTAssertEqual(created.manifest.notebooks.first?.name, "Math (2)")
+        let edited = try await repository.edit(ids[1], details: NotebookDetails(name: "Math"), appending: [])
+        XCTAssertEqual(edited.manifest.notebooks.first(where: { $0.id == ids[1] })?.name, "Math (1)")
+        do { _ = try await repository.edit(ids[1], details: NotebookDetails(name: " \n "), appending: []); XCTFail("Expected empty name") }
+        catch LibraryError.emptyName { }
+    }
+
+    func testMultiSourceCreateAndEditKeepSourceOrderAndStableExistingIDs() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        _ = try await repository.load()
+        let first = try await repository.prepareImport(from: makeFixture())
+        let second = try await repository.prepareImport(from: makeOrientationFixture())
+        defer { PDFService.discard(first); PDFService.discard(second) }
+        let id = UUID()
+        let created = try await repository.create(id: id, details: NotebookDetails(name: "Combined"), from: [second, first])
+        let original = try XCTUnwrap(created.manifest.notebooks.first)
+        XCTAssertEqual(original.pageCount, 3)
+        let createdPDF = try PDFService.validate(at: XCTUnwrap(repository.pdfURL(for: original)))
+        XCTAssertEqual(createdPDF.page(at: 0)?.bounds(for: .mediaBox).width, 200)
+        XCTAssertTrue(createdPDF.page(at: 1)?.string?.contains("First vector page") == true)
+        XCTAssertTrue(createdPDF.page(at: 2)?.string?.contains("Second vector page") == true)
+        let edited = try await repository.edit(id, details: NotebookDetails(name: "Edited", colorID: "red"), appending: [first, second])
+        let saved = try XCTUnwrap(edited.manifest.notebooks.first)
+        XCTAssertEqual(saved.pageCount, 6)
+        XCTAssertEqual(Array(saved.pages.prefix(3)), original.pages)
+        XCTAssertEqual(Set(saved.pages.map(\.id)).count, 6)
+        XCTAssertEqual(saved.name, "Edited")
+        XCTAssertEqual(saved.colorID, "red")
+        let savedPDF = try PDFService.validate(at: XCTUnwrap(repository.pdfURL(for: saved)))
+        XCTAssertTrue(savedPDF.page(at: 3)?.string?.contains("First vector page") == true)
+        XCTAssertEqual(savedPDF.page(at: 5)?.bounds(for: .mediaBox).width, 200)
+    }
+
+    func testBatchCountMismatchDoesNotPartiallySaveMetadataOrPages() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let sample = initial.manifest.notebooks[0]
+        let good = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(good) }
+        let bad = PreparedPDF(url: good.url, suggestedName: "Mismatch", pageCount: good.pageCount + 1)
+        let bytes = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+        do { _ = try await repository.edit(sample.id, details: NotebookDetails(name: "Changed"), appending: [good, bad]); XCTFail("Expected mismatch") }
+        catch LibraryError.pageCountMismatch { }
+        do { _ = try await repository.create(id: UUID(), details: NotebookDetails(name: "Changed"), from: [good, bad]); XCTFail("Expected mismatch") }
+        catch LibraryError.pageCountMismatch { }
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("manifest.json")), bytes)
+        let snapshot = try await repository.load()
+        XCTAssertEqual(snapshot.manifest.notebooks, initial.manifest.notebooks)
+    }
+
+    func testMultiSourceFailuresAreAtomicAndStagedInputsCanRetry() async throws {
+        let initialRepository = LibraryRepository(rootURL: root)
+        let initial = try await initialRepository.load()
+        let original = initial.manifest.notebooks[0]
+        let first = try await initialRepository.prepareImport(from: makeFixture())
+        let second = try await initialRepository.prepareImport(from: makeOrientationFixture())
+        defer { PDFService.discard(first); PDFService.discard(second) }
+        let bytes = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+        for creating in [true, false] {
+            for checkpoint in [LibraryRepository.Checkpoint.afterCandidatePDF, .beforeBackup, .afterBackup, .beforeManifestCommit] {
+                let repository = LibraryRepository(rootURL: root) { reached in
+                    if String(describing: reached) == String(describing: checkpoint) { throw TestFailure.injected }
+                }
+                do {
+                    if creating {
+                        _ = try await repository.create(id: UUID(), details: NotebookDetails(name: "Combined"), from: [first, second])
+                    } else {
+                        _ = try await repository.edit(original.id, details: NotebookDetails(name: "Changed", colorID: "red"), appending: [first, second])
+                    }
+                    XCTFail("Expected injected failure")
+                } catch TestFailure.injected { }
+                XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("manifest.json")), bytes)
+                XCTAssertTrue(FileManager.default.fileExists(atPath: first.url.path))
+                XCTAssertTrue(FileManager.default.fileExists(atPath: second.url.path))
+                let snapshot = try await LibraryRepository(rootURL: root).load()
+                XCTAssertEqual(snapshot.manifest.notebooks, initial.manifest.notebooks)
+                XCTAssertTrue(snapshot.notebookErrors.isEmpty)
+            }
+        }
+        let retried = try await initialRepository.edit(original.id, details: NotebookDetails(name: "Changed"), appending: [first, second])
+        XCTAssertEqual(retried.manifest.notebooks[0].pageCount, 6)
+    }
+
+    func testStoreSaveReportsFirstAddedPageAndKeepsFullManualOrder() async throws {
+        let store = LibraryStore(repository: LibraryRepository(rootURL: root))
+        await store.load()
+        let sample = try XCTUnwrap(store.activeNotebooks.first)
+        let prepared = try await store.repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(prepared) }
+        let saved = try await store.saveNotebook(details: NotebookDetails(name: "New"), notebookID: nil, additions: [prepared])
+        let original = try XCTUnwrap(store.notebook(id: saved.notebookID))
+        XCTAssertEqual(saved.firstAddedPageID, original.pages.first?.id)
+        let appended = try await store.saveNotebook(details: original.details, notebookID: original.id, additions: [prepared])
+        XCTAssertEqual(appended.firstAddedPageID, store.notebook(id: original.id)?.pages[2].id)
+        try await store.setArchived(true, ids: [original.id])
+        XCTAssertEqual(store.activeNotebooks.map(\.id), [sample.id])
+        XCTAssertEqual(store.archivedNotebooks.map(\.id), [original.id])
+        XCTAssertEqual(store.notebooks.map(\.id), [original.id, sample.id])
+        let metadata = try await store.saveNotebook(details: NotebookDetails(name: "Renamed"), notebookID: sample.id, additions: [])
+        XCTAssertNil(metadata.firstAddedPageID)
+        XCTAssertEqual(store.notebooks.map(\.id), [original.id, sample.id])
+    }
+
+    func testInterruptedV1MigrationKeepsLegacyCurrentAndCanRetry() async throws {
+        let initialRepository = LibraryRepository(rootURL: root)
+        let initial = try await initialRepository.load()
+        let sample = initial.manifest.notebooks[0]
+        let legacy = try legacyManifest(initial.manifest.notebooks)
+        let currentURL = root.appendingPathComponent("manifest.json")
+        try legacy.write(to: currentURL)
+        for checkpoint in [LibraryRepository.Checkpoint.beforeBackup, .afterBackup, .beforeManifestCommit] {
+            let repository = LibraryRepository(rootURL: root) { reached in
+                if String(describing: reached) == String(describing: checkpoint) { throw TestFailure.injected }
+            }
+            do { _ = try await repository.setArchived(true, ids: [sample.id]); XCTFail("Expected injected failure") }
+            catch TestFailure.injected { }
+            XCTAssertEqual(try Data(contentsOf: currentURL), legacy)
+            let reloaded = try await LibraryRepository(rootURL: root).load()
+            XCTAssertEqual(reloaded.manifest.notebooks, initial.manifest.notebooks)
+        }
+        let retried = try await initialRepository.setArchived(true, ids: [sample.id])
+        XCTAssertTrue(retried.manifest.notebooks[0].isArchived)
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("manifest.backup.json")), legacy)
+    }
+
+    func testFailedReorderDoesNotPublishAnUnsavedOrder() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let store = LibraryStore(repository: repository)
+        await store.load()
+        let sample = try XCTUnwrap(store.notebooks.first)
+        let prepared = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(prepared) }
+        let saved = try await store.saveNotebook(details: NotebookDetails(name: "New"), notebookID: nil, additions: [prepared])
+        let expected = store.notebooks
+        let failingStore = LibraryStore(repository: LibraryRepository(rootURL: root) { checkpoint in
+            if case .beforeManifestCommit = checkpoint { throw TestFailure.injected }
+        })
+        await failingStore.load()
+        do { try await failingStore.reorderNotebooks(orderedActiveIDs: [sample.id, saved.notebookID]); XCTFail("Expected failure") }
+        catch TestFailure.injected { }
+        XCTAssertEqual(failingStore.notebooks, expected)
+        XCTAssertFalse(failingStore.isBusy)
+        let reloaded = try await LibraryRepository(rootURL: root).load()
+        XCTAssertEqual(reloaded.manifest.notebooks, expected)
+    }
+
+    func testArchivedPDFSurvivesCleanupAndNewNotebookNeedsPages() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let sample = initial.manifest.notebooks[0]
+        _ = try await repository.setArchived(true, ids: [sample.id])
+        _ = try await repository.edit(sample.id, details: NotebookDetails(name: "Archived"), appending: [])
+        let snapshot = try await repository.load()
+        XCTAssertTrue(snapshot.manifest.notebooks[0].isArchived)
+        XCTAssertTrue(snapshot.notebookErrors.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(repository.pdfURL(for: sample)).path))
+        do { _ = try await repository.create(id: UUID(), details: NotebookDetails(name: "Empty"), from: []); XCTFail("Expected pages") }
+        catch PDFError.emptyDocument { }
+    }
+
+    func testArrangedMixedPagesSaveMetadataContentAndRetainedIDsTogether() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        _ = try await repository.load()
+        let originalSource = try await repository.prepareImport(from: makeFixture())
+        let incoming = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(originalSource); PDFService.discard(incoming) }
+        let id = UUID()
+        let created = try await repository.create(id: id, details: NotebookDetails(name: "Original"), from: [originalSource])
+        let original = try XCTUnwrap(created.manifest.notebooks.first)
+        let newPageID = UUID()
+        let layout = [
+            DraftPage(id: newPageID, source: .prepared(incoming.id, 1)),
+            DraftPage(id: original.pages[0].id, source: .existing(original.pages[0].id))
+        ]
+        let edited = try await repository.edit(
+            id, details: NotebookDetails(name: "Arranged", colorID: "green"), appending: [incoming], pageLayout: layout
+        )
+        let saved = try XCTUnwrap(edited.manifest.notebooks.first)
+        XCTAssertEqual(saved.pages.map(\.id), layout.map(\.id))
+        XCTAssertEqual(saved.name, "Arranged")
+        XCTAssertEqual(saved.colorID, "green")
+        let document = try PDFService.validate(at: XCTUnwrap(repository.pdfURL(for: saved)))
+        XCTAssertTrue(document.page(at: 0)?.string?.contains("Second vector page") == true)
+        XCTAssertTrue(document.page(at: 1)?.string?.contains("First vector page") == true)
+        XCTAssertEqual(document.page(at: 1)?.annotations.first?.contents, "A preserved note")
+        XCTAssertEqual(document.page(at: 1)?.bounds(for: .cropBox), CGRect(x: 10, y: 20, width: 360, height: 540))
+        let reopened = try await LibraryRepository(rootURL: root).load()
+        XCTAssertEqual(reopened.manifest.notebooks.first?.pages, saved.pages)
+    }
+
+    func testArrangingAllPagesAwayRejectsNewButCanEmptyExistingNotebook() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let sample = initial.manifest.notebooks[0]
+        let incoming = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(incoming) }
+        do {
+            _ = try await repository.create(id: UUID(), details: NotebookDetails(name: "Empty"), from: [incoming], pageLayout: [])
+            XCTFail("A new notebook needs retained pages")
+        } catch PDFError.emptyDocument { }
+        let emptied = try await repository.edit(sample.id, details: sample.details, appending: [incoming], pageLayout: [])
+        let saved = emptied.manifest.notebooks[0]
+        XCTAssertTrue(saved.pages.isEmpty)
+        XCTAssertNil(saved.revisionID)
+        XCTAssertNil(repository.pdfURL(for: saved))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: incoming.url.path))
+    }
+
+    func testInvalidDraftSourcesCannotChangeSavedLibrary() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let sample = initial.manifest.notebooks[0]
+        let incoming = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(incoming) }
+        let existingID = sample.pages[0].id
+        let newID = UUID()
+        let valid = DraftPage(id: newID, source: .prepared(incoming.id, 0))
+        let invalidLayouts = [
+            [DraftPage(id: UUID(), source: .existing(UUID()))],
+            [DraftPage(id: UUID(), source: .existing(existingID))],
+            [DraftPage(id: UUID(), source: .prepared(UUID(), 0))],
+            [DraftPage(id: UUID(), source: .prepared(incoming.id, -1))],
+            [DraftPage(id: UUID(), source: .prepared(incoming.id, incoming.pageCount))],
+            [DraftPage(id: existingID, source: .prepared(incoming.id, 0))],
+            [valid, DraftPage(id: newID, source: .prepared(incoming.id, 1))],
+            [valid, DraftPage(id: UUID(), source: .prepared(incoming.id, 0))]
+        ]
+        let bytes = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+        for layout in invalidLayouts {
+            do {
+                _ = try await repository.edit(sample.id, details: NotebookDetails(name: "Changed"), appending: [incoming], pageLayout: layout)
+                XCTFail("Expected invalid source rejection")
+            } catch LibraryError.invalidChange { }
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("manifest.json")), bytes)
+        }
+        do {
+            _ = try await repository.create(id: UUID(), details: NotebookDetails(name: "Invalid"), from: [incoming], pageLayout: [DraftPage(id: existingID, source: .existing(existingID))])
+            XCTFail("A new notebook cannot reference saved pages")
+        } catch LibraryError.invalidChange { }
+        let reloaded = try await repository.load()
+        XCTAssertEqual(reloaded.manifest.notebooks, initial.manifest.notebooks)
+    }
+
+    func testRemovingAllIncomingPagesLeavesExistingPDFBytesUntouched() async throws {
+        let repository = LibraryRepository(rootURL: root)
+        let initial = try await repository.load()
+        let sample = initial.manifest.notebooks[0]
+        let incoming = try await repository.prepareImport(from: makeFixture())
+        defer { PDFService.discard(incoming) }
+        let originalBytes = try Data(contentsOf: XCTUnwrap(repository.pdfURL(for: sample)))
+        let layout = sample.pages.map { DraftPage(id: $0.id, source: .existing($0.id)) }
+        let edited = try await repository.edit(sample.id, details: NotebookDetails(name: "Metadata"), appending: [incoming], pageLayout: layout)
+        let saved = edited.manifest.notebooks[0]
+        XCTAssertEqual(saved.revisionID, sample.revisionID)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(repository.pdfURL(for: saved))), originalBytes)
+    }
+
+    private func legacyManifest(_ notebooks: [Notebook]) throws -> Data {
+        let encoded = try JSONEncoder().encode(LibraryManifest(notebooks: notebooks))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        json["schemaVersion"] = 1
+        var entries = try XCTUnwrap(json["notebooks"] as? [[String: Any]])
+        for index in entries.indices {
+            entries[index].removeValue(forKey: "symbolName")
+            entries[index].removeValue(forKey: "colorID")
+            entries[index].removeValue(forKey: "isArchived")
+        }
+        json["notebooks"] = entries
+        return try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+    }
+
     private func makeFixture() throws -> URL {
         let url = folder.appendingPathComponent("fixture-\(UUID().uuidString).pdf")
         var box = CGRect(x: 0, y: 0, width: 400, height: 600)

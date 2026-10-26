@@ -75,6 +75,36 @@ final class LargeNotebookTests: XCTestCase {
         recordBenchmark("30 synthetic 3.5MP scan pages", since: started, pdfURL: prepared.url, root: prepared.url.deletingLastPathComponent())
     }
 
+    func testLibraryValidationAndColdThumbnails() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LibraryRepository(rootURL: root.appendingPathComponent("Library"))
+        let initial = try await repository.load()
+        let sampleURL = try XCTUnwrap(repository.pdfURL(for: initial.manifest.notebooks[0]))
+        let prepared = try await repository.prepareImport(from: sampleURL)
+        defer { PDFService.discard(prepared) }
+        for index in 0..<20 {
+            _ = try await repository.create(id: UUID(), name: "Benchmark \(index)", from: prepared)
+        }
+        let validationStarted = Date()
+        let snapshot = try await repository.load()
+        XCTAssertTrue(snapshot.notebookErrors.isEmpty)
+        recordBenchmark("21-notebook full validation", since: validationStarted, pdfURL: sampleURL, root: root)
+        let thumbnailsStarted = Date()
+        for notebook in snapshot.manifest.notebooks {
+            let url = try XCTUnwrap(repository.pdfURL(for: notebook))
+            for index in notebook.pages.indices {
+                try autoreleasepool {
+                    let document = try XCTUnwrap(PDFDocument(url: url))
+                    let page = try XCTUnwrap(document.page(at: index))
+                    let image = page.thumbnail(of: CGSize(width: 300, height: 400), for: .mediaBox)
+                    XCTAssertGreaterThan(image.size.width, 0)
+                }
+            }
+        }
+        recordBenchmark("63 cold page thumbnails", since: thumbnailsStarted, pdfURL: sampleURL, root: root)
+    }
+
     private func recordBenchmark(_ name: String, since started: Date, pdfURL: URL, root: URL) {
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)

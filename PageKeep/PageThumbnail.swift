@@ -56,7 +56,7 @@ private actor ThumbnailCache {
             guard let document = PDFDocument(url: url),
                   let page = document.page(at: pageIndex) else { return ThumbnailImage(image: nil) }
             let image = page.thumbnail(of: CGSize(width: 300, height: 400), for: .mediaBox)
-            cache.setObject(image, forKey: key, cost: Int(image.size.width * image.size.height * 4))
+            cache.setObject(image, forKey: key, cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
             return ThumbnailImage(image: image)
         }
     }

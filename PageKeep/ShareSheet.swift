@@ -20,7 +20,7 @@ struct ShareSheet: UIViewControllerRepresentable {
         let coordinator = context.coordinator
         controller.completionWithItemsHandler = { _, _, _, error in
             Task { @MainActor in
-                coordinator.cleanup()
+                guard coordinator.finish() else { return }
                 if let error {
                     onError(error)
                 }
@@ -47,20 +47,23 @@ struct ShareSheet: UIViewControllerRepresentable {
     final class Coordinator {
         let url: URL
         private var cleanedUp = false
+        private var completed = false
 
         init(url: URL) {
             self.url = url
         }
 
+        func finish() -> Bool {
+            guard !completed else { return false }
+            completed = true
+            cleanup()
+            return true
+        }
+
         func cleanup() {
             guard !cleanedUp else { return }
             cleanedUp = true
-            let folder = url.deletingLastPathComponent()
-            guard folder.deletingLastPathComponent().lastPathComponent == "PageKeep-Share",
-                  UUID(uuidString: folder.lastPathComponent) != nil else { return }
-            Task.detached(priority: .utility) {
-                try? FileManager.default.removeItem(at: folder)
-            }
+            ShareFileCleanup.remove(url)
         }
     }
 }

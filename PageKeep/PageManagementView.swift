@@ -5,11 +5,13 @@ struct PageManagementView: View {
     let notebookID: UUID
     let onOpenPage: (UUID) -> Void
     @State private var isSelecting = false
+    @State private var isPerformingAction = false
     @State private var selectedIDs: Set<UUID> = []
     @State private var showsDeleteConfirmation = false
     @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
 
+    private var isBusy: Bool { store.isBusy || isPerformingAction }
     private var notebook: Notebook? { store.notebook(id: notebookID) }
     private var pageIDs: [UUID] { notebook?.pages.map(\.id) ?? [] }
 
@@ -34,17 +36,17 @@ struct PageManagementView: View {
                     }
                     .accessibilityIdentifier("manager.select")
                     .accessibilityLabel(isSelecting ? "Cancel page selection" : "Select pages")
-                    .disabled(store.isBusy)
+                    .disabled(isBusy)
                 }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }.disabled(store.isBusy)
+                Button("Done") { dismiss() }.disabled(isBusy)
             }
         }
         .safeAreaInset(edge: .bottom) {
             if isSelecting, !pageIDs.isEmpty { selectionActions }
         }
-        .interactiveDismissDisabled(store.isBusy)
+        .interactiveDismissDisabled(isBusy)
         .onChange(of: pageIDs) { _, ids in
             selectedIDs.formIntersection(ids)
             if ids.isEmpty { isSelecting = false }
@@ -52,11 +54,9 @@ struct PageManagementView: View {
         .confirmationDialog("Delete \(selectedIDs.count) \(selectedIDs.count == 1 ? "page" : "pages")?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete Pages", role: .destructive) {
                 let ids = selectedIDs
-                Task {
-                    do {
-                        try await store.deletePages(in: notebookID, ids: ids)
-                        selectedIDs.subtract(ids)
-                    } catch { errorMessage = error.localizedDescription }
+                perform {
+                    try await store.deletePages(in: notebookID, ids: ids)
+                    selectedIDs.subtract(ids)
                 }
             }
         } message: {
@@ -88,14 +88,14 @@ struct PageManagementView: View {
                         pageRow(notebook, pageID: page.id, index: index)
                     }
                     .buttonStyle(.plain)
-                    .disabled(store.isBusy)
-                    .moveDisabled(isSelecting || store.isBusy)
+                    .disabled(isBusy)
+                    .moveDisabled(isSelecting || isBusy)
                     .accessibilityIdentifier("manager.page.\(page.id.uuidString)")
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Page \(index + 1)")
                     .accessibilityValue(isSelecting ? (selectedIDs.contains(page.id) ? "Selected" : "Not selected") : "")
                     .accessibilityActions {
-                        if !isSelecting, !store.isBusy {
+                        if !isSelecting, !isBusy {
                             if index > 0 {
                                 Button("Move Earlier") { movePage(page.id, by: -1) }
                             }
@@ -167,26 +167,23 @@ struct PageManagementView: View {
         .padding(.horizontal)
         .padding(.top, 8)
         .background(.bar)
-        .disabled(store.isBusy)
+        .disabled(isBusy)
     }
 
     private func rotateSelectedPages() {
         let ids = selectedIDs
-        Task {
-            do { try await store.rotatePages(in: notebookID, ids: ids) }
-            catch { errorMessage = error.localizedDescription }
-        }
+        perform { try await store.rotatePages(in: notebookID, ids: ids) }
     }
 
     private func movePages(from offsets: IndexSet, to destination: Int) {
-        guard !isSelecting, !store.isBusy else { return }
+        guard !isSelecting, !isBusy else { return }
         var ids = pageIDs
         ids.move(fromOffsets: offsets, toOffset: destination)
         saveOrder(ids)
     }
 
     private func movePage(_ id: UUID, by offset: Int) {
-        guard !isSelecting, !store.isBusy, let index = pageIDs.firstIndex(of: id) else { return }
+        guard !isSelecting, !isBusy, let index = pageIDs.firstIndex(of: id) else { return }
         let target = index + offset
         guard pageIDs.indices.contains(target) else { return }
         var ids = pageIDs
@@ -195,9 +192,16 @@ struct PageManagementView: View {
     }
 
     private func saveOrder(_ ids: [UUID]) {
+        perform { try await store.reorderPages(in: notebookID, orderedIDs: ids) }
+    }
+    private func perform(_ action: @escaping () async throws -> Void) {
+        guard !isBusy else { return }
+        isPerformingAction = true
         Task {
-            do { try await store.reorderPages(in: notebookID, orderedIDs: ids) }
+            defer { isPerformingAction = false }
+            do { try await action() }
             catch { errorMessage = error.localizedDescription }
         }
     }
+
 }

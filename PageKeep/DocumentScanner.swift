@@ -20,24 +20,38 @@ struct DocumentScanner: UIViewControllerRepresentable {
         return controller
     }
 
-    func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
+    func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    static func dismantleUIViewController(_ controller: VNDocumentCameraViewController, coordinator: Coordinator) {
+        controller.delegate = nil
+        coordinator.isActive = false
+    }
 
     final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
-        let parent: DocumentScanner
+        var parent: DocumentScanner
+        var isActive = true
 
         init(parent: DocumentScanner) {
             self.parent = parent
         }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            guard isActive else { return }
+            isActive = false
             parent.onCapture(CapturedScan(scan: scan))
         }
 
         func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            guard isActive else { return }
+            isActive = false
             parent.onCancel()
         }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            guard isActive else { return }
+            isActive = false
             parent.onFailure(error)
         }
     }

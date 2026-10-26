@@ -1,45 +1,80 @@
-import AVFoundation
 import SwiftUI
-import UniformTypeIdentifiers
-import VisionKit
-
-enum AcquisitionSource {
-    case scan
-    case importPDF
-}
 
 struct AcquisitionView: View {
     let store: LibraryStore
-    let notebookID: UUID?
-    let initialSource: AcquisitionSource?
-    let onSaved: (UUID, UUID?) -> Void
-
+    let initialSource: AcquisitionSource
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @State private var showScanner = false
-    @State private var showImporter = false
-    @State private var started = false
-    @State private var prepared: PreparedPDF?
-    @State private var capturedScan: CapturedScan?
-    @State private var importedURL: URL?
-    @State private var name = "Untitled Notebook"
-    @State private var errorMessage: String?
-    @State private var cameraMessage: String?
-    @State private var canOpenSettings = false
-    @State private var isPreparing = false
-    @State private var isSaving = false
-    @State private var work: Task<Void, Never>?
-    private let scanProcessor = ScanProcessor()
+    @State private var model: AcquisitionModel
+    @State private var showsDiscardConfirmation = false
 
-    private var notebook: Notebook? {
-        notebookID.flatMap { store.notebook(id: $0) }
+    init(
+        store: LibraryStore,
+        purpose: AcquisitionPurpose,
+        initialSource: AcquisitionSource,
+        onComplete: @escaping (AcquisitionResult) -> Void
+    ) {
+        self.store = store
+        self.initialSource = initialSource
+        _model = State(initialValue: AcquisitionModel(store: store, purpose: purpose, onComplete: onComplete))
     }
 
-    private var trimmedName: String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var notebook: Notebook? {
+        model.purpose.notebookID.flatMap { store.notebook(id: $0) }
     }
 
     var body: some View {
+        Group {
+            if let draft = model.editorDraft {
+                NotebookEditorView(store: store, draft: draft) { id, pageID in
+                    model.editorSaved(SavedNotebook(notebookID: id, firstAddedPageID: pageID))
+                }
+            } else {
+                acquisitionContent
+                    .background {
+                        DraftDismissalGuard(
+                            isBlocked: model.blocksDismissal,
+                            onAttempt: requestCancel,
+                            onDismiss: model.cancel
+                        )
+                    }
+                    .confirmationDialog("Discard pending pages?", isPresented: $showsDiscardConfirmation, titleVisibility: .visible) {
+                        Button("Discard Changes", role: .destructive, action: cancel)
+                        Button("Keep Editing", role: .cancel) { }
+                    }
+            }
+        }
+        .task { model.start(initialSource) }
+        .onChange(of: model.phase) { _, phase in
+            if phase == .finished {
+                showsDiscardConfirmation = false
+                if case .draft = model.purpose { dismiss() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var acquisitionContent: some View {
+        switch model.phase {
+        case .importer:
+            PDFImporter(onImport: model.receiveImport, onCancel: {
+                guard model.phase == .importer else { return }
+                cancel()
+            })
+                .accessibilityIdentifier("acquisition.pdfPicker")
+                .ignoresSafeArea()
+        case .scanner:
+            DocumentScanner(onCapture: model.receiveScan, onCancel: {
+                guard model.phase == .scanner else { return }
+                cancel()
+            }, onFailure: model.scannerFailed)
+                .ignoresSafeArea()
+        default:
+            acquisitionForm
+        }
+    }
+
+    private var acquisitionForm: some View {
         NavigationStack {
             Form {
                 if let notebook {
@@ -49,236 +84,73 @@ struct AcquisitionView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-
-                if isPreparing {
+                if model.phase == .preparing {
+                    Section { ProgressView("Preparing pages…") }
+                } else if let prepared = model.prepared {
                     Section {
-                        ProgressView("Preparing pages…")
-                    }
-                } else if let prepared {
-                    Section {
-                        if notebookID == nil {
-                            TextField("Notebook name", text: $name)
-                                .accessibilityIdentifier("acquisition.name")
-                        }
                         Label(prepared.pageCount == 1 ? "1 page ready" : "\(prepared.pageCount) pages ready", systemImage: "doc")
-                    } footer: {
-                        if notebookID == nil && trimmedName.isEmpty {
-                            Text("Enter a notebook name to save.")
-                        }
-                    }
-
-                    Section {
-                        Button {
-                            save(prepared)
-                        } label: {
-                            if isSaving {
+                        Button(action: model.save) {
+                            if model.isSaving {
                                 ProgressView("Saving…")
                             } else {
-                                Text(notebookID == nil ? "Save Notebook" : "Add \(prepared.pageCount) \(prepared.pageCount == 1 ? "Page" : "Pages")")
+                                Text("Add \(prepared.pageCount) \(prepared.pageCount == 1 ? "Page" : "Pages")")
                             }
                         }
                         .accessibilityIdentifier("acquisition.save")
-                        .disabled(isSaving || store.isBusy || (notebookID == nil && trimmedName.isEmpty))
+                        .disabled(model.isSaving || store.isBusy)
                     }
-                } else {
-                    sourceSection
-                }
-
-                if let errorMessage {
+                } else if let message = model.cameraMessage {
                     Section {
-                        Text(errorMessage).foregroundStyle(.red)
-                        if !isPreparing && !isSaving && (prepared != nil || capturedScan != nil || importedURL != nil) {
-                            Button("Retry") {
-                                if let prepared {
-                                    save(prepared)
-                                } else {
-                                    preparePages()
-                                }
+                        Text(message).foregroundStyle(.secondary)
+                        if model.canOpenSettings {
+                            Button("Open Settings") {
+                                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                             }
-                            .disabled(store.isBusy)
                         }
+                        Button("Import PDF", systemImage: "doc.badge.plus") { model.choose(.importPDF) }
+                    }
+                } else if model.errorMessage == nil {
+                    Section { ProgressView("Opening…") }
+                }
+                if let message = model.errorMessage {
+                    Section {
+                        Text(message).foregroundStyle(.red)
+                        Button("Retry", action: model.retry)
+                            .disabled(store.isBusy)
                     }
                 }
             }
-            .navigationTitle(notebookID == nil ? "New Notebook" : "Add Pages")
+            .navigationTitle(model.purpose.notebookID == nil ? "New Notebook" : "Add Pages")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { cancel() }
-                        .disabled(isSaving)
+                    Button("Cancel", action: requestCancel).disabled(model.isSaving)
                 }
             }
-            .disabled(isSaving)
-        }
-        .interactiveDismissDisabled(isSaving)
-        .fullScreenCover(isPresented: $showScanner) {
-            DocumentScanner { capture in
-                showScanner = false
-                capturedScan = capture
-                importedURL = nil
-                preparePages()
-            } onCancel: {
-                showScanner = false
-                cancel()
-            } onFailure: { error in
-                showScanner = false
-                errorMessage = "Scanning failed. \(error.localizedDescription)"
-            }
-            .ignoresSafeArea()
-        }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                importedURL = url
-                capturedScan = nil
-                preparePages()
-            case .failure(let error):
-                if (error as NSError).code != NSUserCancelledError {
-                    errorMessage = "The PDF could not be opened. \(error.localizedDescription)"
-                }
-            }
-        }
-        .task {
-            guard !started else { return }
-            started = true
-            if let initialSource {
-                choose(initialSource)
-            }
-        }
-        .onDisappear {
-            if !showScanner {
-                work?.cancel()
-                discardPrepared()
-            }
+            .disabled(model.isSaving)
         }
     }
 
-    private var sourceSection: some View {
-        Section {
-            Button { choose(.scan) } label: {
-                Label("Scan Pages", systemImage: "doc.viewfinder")
-            }
-            Button { choose(.importPDF) } label: {
-                Label("Import PDF", systemImage: "doc.badge.plus")
-            }
-            if let cameraMessage {
-                Text(cameraMessage).foregroundStyle(.secondary)
-                if canOpenSettings {
-                    Button("Open Settings") {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            openURL(url)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func choose(_ source: AcquisitionSource) {
-        errorMessage = nil
-        switch source {
-        case .importPDF:
-            showImporter = true
-        case .scan:
-            cameraMessage = nil
-            canOpenSettings = false
-            guard VNDocumentCameraViewController.isSupported else {
-                cameraMessage = "Document scanning is unavailable on this device. You can import a PDF instead."
-                return
-            }
-            switch AVCaptureDevice.authorizationStatus(for: .video) {
-            case .authorized:
-                showScanner = true
-            case .notDetermined:
-                work = Task {
-                    let allowed = await AVCaptureDevice.requestAccess(for: .video)
-                    guard !Task.isCancelled else { return }
-                    if allowed {
-                        showScanner = true
-                    } else {
-                        showCameraDenied()
-                    }
-                }
-            case .denied:
-                showCameraDenied()
-            case .restricted:
-                cameraMessage = "Camera access is restricted on this device. You can import a PDF instead."
-            @unknown default:
-                cameraMessage = "The camera is unavailable. You can import a PDF instead."
-            }
-        }
-    }
-
-    private func showCameraDenied() {
-        cameraMessage = "Allow camera access in Settings to scan pages, or import a PDF."
-        canOpenSettings = true
-    }
-
-    private func preparePages() {
-        work?.cancel()
-        isPreparing = true
-        errorMessage = nil
-        let capture = capturedScan
-        let sourceURL = importedURL
-        work = Task {
-            do {
-                let result: PreparedPDF
-                if let capture {
-                    result = try await scanProcessor.prepare(capture)
-                } else if let sourceURL {
-                    result = try await store.repository.prepareImport(from: sourceURL)
-                } else {
-                    isPreparing = false
-                    return
-                }
-                if Task.isCancelled {
-                    await store.repository.discardPrepared(result)
-                    return
-                }
-                prepared = result
-                name = result.suggestedName
-                capturedScan = nil
-                importedURL = nil
-                isPreparing = false
-            } catch {
-                guard !Task.isCancelled else { return }
-                isPreparing = false
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func save(_ prepared: PreparedPDF) {
-        isSaving = true
-        errorMessage = nil
-        let existingCount = notebook?.pageCount ?? 0
-        work = Task {
-            do {
-                let id = try await store.savePrepared(prepared, name: trimmedName, notebookID: notebookID)
-                let firstPageID = store.notebook(id: id)?.pages.dropFirst(existingCount).first?.id
-                await store.repository.discardPrepared(prepared)
-                self.prepared = nil
-                isSaving = false
-                onSaved(id, firstPageID)
-                dismiss()
-            } catch {
-                isSaving = false
-                errorMessage = error.localizedDescription
-            }
+    private func requestCancel() {
+        guard !model.isSaving else { return }
+        if model.hasPendingPages {
+            showsDiscardConfirmation = true
+        } else {
+            cancel()
         }
     }
 
     private func cancel() {
-        work?.cancel()
-        discardPrepared()
-        capturedScan = nil
+        model.cancel()
         dismiss()
     }
+}
 
-    private func discardPrepared() {
-        guard let prepared else { return }
-        self.prepared = nil
-        Task { await store.repository.discardPrepared(prepared) }
+struct AcquisitionMenuChoices: View {
+    let onChoose: (AcquisitionSource) -> Void
+
+    var body: some View {
+        Button("Scan Pages", systemImage: "doc.viewfinder") { onChoose(.scan) }
+        Button("Import PDF", systemImage: "doc.badge.plus") { onChoose(.importPDF) }
     }
 }

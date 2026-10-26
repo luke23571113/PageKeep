@@ -57,7 +57,7 @@ enum PDFService {
         let content = [
             ("Welcome to PageKeep", "Your paper pages, together.\n\nScan pages or import a PDF to start a notebook.\nThis sample has three real PDF pages to explore."),
             ("Keep pages in order", "Open a notebook to read its pages.\n\nUse Manage Pages to reorder, rotate, or delete pages.\nAdd more pages whenever you need them."),
-            ("Take your notes with you", "Share a whole notebook as a PDF.\n\nYour notebooks stay on this device.\nYou can rename or delete this sample at any time.")
+            ("Take your notes with you", "Share a whole notebook as a PDF.\n\nYour notebooks stay on this device.\nEdit or archive this sample whenever you like.")
         ]
         for (index, page) in content.enumerated() {
             context.beginPDFPage(nil)
@@ -107,6 +107,68 @@ enum PDFError: LocalizedError {
         case .emptyDocument: "This PDF does not contain any pages."
         case .restrictedDocument: "This PDF does not allow copying or page changes."
         case .writeFailed: "The PDF could not be saved."
+        }
+    }
+}
+
+enum PDFPageComposition {
+    static func arrangedDocument(
+        _ layout: [DraftPage], existingNotebook: Notebook?, existingDocument: PDFDocument?, additions: [PreparedPDF], documents: [PDFDocument]
+    ) throws -> PDFDocument {
+        guard Set(layout.map(\.id)).count == layout.count,
+              Set(layout.map(\.source)).count == layout.count,
+              Set(additions.map(\.id)).count == additions.count else { throw LibraryError.invalidChange }
+        let existingPages = existingNotebook?.pages ?? []
+        let existingIndices = Dictionary(uniqueKeysWithValues: existingPages.enumerated().map { ($0.element.id, $0.offset) })
+        let batchIndices = Dictionary(uniqueKeysWithValues: additions.enumerated().map { ($0.element.id, $0.offset) })
+        for page in layout {
+            switch page.source {
+            case .existing(let id):
+                guard page.id == id, existingIndices[id] != nil else { throw LibraryError.invalidChange }
+            case .prepared(let batchID, let index):
+                guard existingIndices[page.id] == nil,
+                      let batchIndex = batchIndices[batchID],
+                      index >= 0, index < additions[batchIndex].pageCount else { throw LibraryError.invalidChange }
+            }
+        }
+        let arranged = PDFDocument()
+        arranged.documentAttributes = existingDocument?.documentAttributes ?? documents.first?.documentAttributes
+        for page in layout {
+            try Task.checkCancellation()
+            let sourcePage: PDFPage?
+            switch page.source {
+            case .existing(let id):
+                guard let index = existingIndices[id] else { throw LibraryError.invalidChange }
+                sourcePage = existingDocument?.page(at: index)
+            case .prepared(let batchID, let index):
+                guard let batchIndex = batchIndices[batchID] else { throw LibraryError.invalidChange }
+                sourcePage = documents[batchIndex].page(at: index)
+            }
+            guard let copied = sourcePage?.copy() as? PDFPage else { throw PDFError.invalidDocument }
+            arranged.insert(copied, at: arranged.pageCount)
+        }
+        return arranged
+    }
+
+    static func append(_ sources: [PDFDocument], to document: PDFDocument, notebook: inout Notebook) throws {
+        for source in sources {
+            for index in 0..<source.pageCount {
+                try Task.checkCancellation()
+                guard let page = source.page(at: index)?.copy() as? PDFPage else { throw PDFError.invalidDocument }
+                document.insert(page, at: document.pageCount)
+                notebook.pages.append(NotebookPage())
+            }
+        }
+    }
+}
+
+enum ShareFileCleanup {
+    static func remove(_ url: URL) {
+        let folder = url.deletingLastPathComponent()
+        guard folder.deletingLastPathComponent().lastPathComponent == "PageKeep-Share",
+              UUID(uuidString: folder.lastPathComponent) != nil else { return }
+        Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: folder)
         }
     }
 }
