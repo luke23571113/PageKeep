@@ -3,18 +3,6 @@ import Foundation
 struct DraftPagePreviewSource {
     let url: URL
     let pageIndex: Int
-
-    init(url: URL, pageIndex: Int) {
-        self.url = url
-        self.pageIndex = pageIndex
-    }
-
-    init?(page: DraftPage, notebook: Notebook?, savedURL: URL?, additions: [PreparedPDF]) {
-        let sources = DraftPagePreviewSources(notebook: notebook, savedURL: savedURL, additions: additions)
-        guard let source = sources.source(for: page) else { return nil }
-        self = source
-    }
-
 }
 
 struct DraftPagePreviewSources {

@@ -265,15 +265,8 @@ struct ContentView: View {
     private var createNotebookMenu: some View {
         Menu {
             Section("Create New Notebook") {
-                Button {
-                    presentation.show(.acquisition(nil, .scan))
-                } label: {
-                    Label("Scan Pages", systemImage: "doc.viewfinder")
-                }
-                Button {
-                    presentation.show(.acquisition(nil, .importPDF))
-                } label: {
-                    Label("Import PDF", systemImage: "doc.badge.plus")
+                AcquisitionMenuChoices { source in
+                    presentation.show(.acquisition(nil, source))
                 }
             }
         } label: {

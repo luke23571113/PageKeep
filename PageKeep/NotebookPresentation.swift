@@ -27,8 +27,8 @@ final class NotebookPresentation {
         show(.acquisition(notebookID, source))
     }
 
-    func finish(opening notebookID: UUID? = nil, pageID: UUID? = nil, requestID: UUID? = nil) {
-        guard let activeID = self.requestID, requestID == nil || requestID == activeID else { return }
+    func finish(opening notebookID: UUID? = nil, pageID: UUID? = nil, requestID: UUID) {
+        guard self.requestID == requestID else { return }
         destination = notebookID.map { NotebookDestination(notebookID: $0, pageID: pageID) }
         sheet = nil
     }
@@ -132,11 +132,8 @@ struct NotebookMenuActions: View {
             presentation.show(.edit(notebook.id))
         }
         Menu("Add Pages", systemImage: "doc.badge.plus") {
-            Button("Scan Pages", systemImage: "doc.viewfinder") {
-                presentation.show(.acquisition(notebook.id, .scan))
-            }
-            Button("Import PDF", systemImage: "doc.badge.plus") {
-                presentation.show(.acquisition(notebook.id, .importPDF))
+            AcquisitionMenuChoices { source in
+                presentation.show(.acquisition(notebook.id, source))
             }
         }
         .disabled(store.notebookErrors[notebook.id] != nil)

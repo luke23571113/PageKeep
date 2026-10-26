@@ -209,10 +209,6 @@ actor LibraryRepository {
         return try commit(next)
     }
 
-    func create(id: UUID, name: String, from prepared: PreparedPDF) throws -> LibrarySnapshot {
-        try create(id: id, details: NotebookDetails(name: name), from: [prepared])
-    }
-
     func append(to id: UUID, from prepared: PreparedPDF) throws -> LibrarySnapshot {
         var next = try loadedManifest()
         let index = try notebookIndex(id, in: next)
@@ -221,13 +217,6 @@ actor LibraryRepository {
         try PDFPageComposition.append([incoming], to: document, notebook: &next.notebooks[index])
         try updatePDF(document, notebook: &next.notebooks[index])
         return try commit(next)
-    }
-
-    func rename(_ id: UUID, to name: String) throws -> LibrarySnapshot {
-        let current = try loadedManifest()
-        var details = current.notebooks[try notebookIndex(id, in: current)].details
-        details.name = name
-        return try edit(id, details: details, appending: [])
     }
 
     func deleteNotebook(_ id: UUID) throws -> LibrarySnapshot {

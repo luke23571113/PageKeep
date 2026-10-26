@@ -99,7 +99,9 @@ final class LibraryRepositoryTests: XCTestCase {
         let repository = LibraryRepository(rootURL: root)
         let first = try await repository.load()
         let sample = try XCTUnwrap(first.manifest.notebooks.first)
-        _ = try await repository.rename(sample.id, to: "Changed")
+        var details = sample.details
+        details.name = "Changed"
+        _ = try await repository.edit(sample.id, details: details, appending: [])
         let damaged = Data("broken JSON".utf8)
         try damaged.write(to: root.appendingPathComponent("manifest.json"))
         let reopened = LibraryRepository(rootURL: root)
@@ -153,7 +155,10 @@ final class LibraryRepositoryTests: XCTestCase {
         catch LibraryError.newerSchema { }
         let canRecover = await reopened.canRecover()
         XCTAssertFalse(canRecover)
-        do { _ = try await reopened.rename(UUID(), to: "No write"); XCTFail("Expected newer schema") }
+        do {
+            _ = try await reopened.edit(UUID(), details: NotebookDetails(name: "No write"), appending: [])
+            XCTFail("Expected newer schema")
+        }
         catch LibraryError.newerSchema { }
         XCTAssertEqual(try Data(contentsOf: url), future)
     }
@@ -167,7 +172,7 @@ final class LibraryRepositoryTests: XCTestCase {
             $0.contents == "A preserved note"
         })?.bounds)
         let id = UUID()
-        let created = try await repository.create(id: id, name: "Fixture", from: prepared)
+        let created = try await repository.create(id: id, details: NotebookDetails(name: "Fixture"), from: [prepared])
         let notebook = try XCTUnwrap(created.manifest.notebooks.first(where: { $0.id == id }))
         XCTAssertEqual(try Data(contentsOf: prepared.url), try Data(contentsOf: XCTUnwrap(repository.pdfURL(for: notebook))),
                        "Initial import preserves the original PDF bytes")
@@ -207,7 +212,7 @@ final class LibraryRepositoryTests: XCTestCase {
         _ = try await repository.load()
         let prepared = try await repository.prepareImport(from: makeOrientationFixture())
         let id = UUID()
-        let created = try await repository.create(id: id, name: "Orientation", from: prepared)
+        let created = try await repository.create(id: id, details: NotebookDetails(name: "Orientation"), from: [prepared])
         let original = try XCTUnwrap(created.manifest.notebooks.first(where: { $0.id == id }))
         let rotated = try await repository.rotatePages(in: id, ids: [original.pages[0].id])
         let notebook = try XCTUnwrap(rotated.manifest.notebooks.first(where: { $0.id == id }))
@@ -273,7 +278,9 @@ final class LibraryRepositoryTests: XCTestCase {
         let bytes = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await repository.rename(sample.id, to: "Cancelled")
+            var details = sample.details
+            details.name = "Cancelled"
+            return try await repository.edit(sample.id, details: details, appending: [])
         }
         do { _ = try await task.value; XCTFail("Expected cancellation") }
         catch is CancellationError { }
@@ -289,7 +296,7 @@ final class LibraryRepositoryTests: XCTestCase {
         try PDFService.write(imported, to: source)
         let prepared = try await repository.prepareImport(from: source)
         let id = UUID()
-        let created = try await repository.create(id: id, name: "Already rotated", from: prepared)
+        let created = try await repository.create(id: id, details: NotebookDetails(name: "Already rotated"), from: [prepared])
         let original = try XCTUnwrap(created.manifest.notebooks.first(where: { $0.id == id }))
         var snapshot = created
         for expectedRotation in [0, 90, 180, 270] {
@@ -308,7 +315,9 @@ final class LibraryRepositoryTests: XCTestCase {
         let initial = try await repository.load()
         let original = try XCTUnwrap(initial.manifest.notebooks.first)
         let originalBytes = try Data(contentsOf: XCTUnwrap(repository.pdfURL(for: original)))
-        _ = try await repository.rename(original.id, to: "  Class notes  ")
+        var details = original.details
+        details.name = "  Class notes  "
+        _ = try await repository.edit(original.id, details: details, appending: [])
         let reloaded = try await LibraryRepository(rootURL: root).load()
         let renamed = try XCTUnwrap(reloaded.manifest.notebooks.first)
         XCTAssertEqual(renamed.name, "Class notes")
@@ -405,7 +414,9 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(recovered.manifest.notebooks, initial.manifest.notebooks)
         XCTAssertEqual(try Data(contentsOf: backupURL), bytes)
         XCTAssertEqual(try Data(contentsOf: currentURL), bytes)
-        _ = try await repository.rename(initial.manifest.notebooks[0].id, to: "Recovered")
+        var details = initial.manifest.notebooks[0].details
+        details.name = "Recovered"
+        _ = try await repository.edit(initial.manifest.notebooks[0].id, details: details, appending: [])
         XCTAssertEqual(try Data(contentsOf: backupURL), bytes)
         let reloaded = try await LibraryRepository(rootURL: root).load()
         XCTAssertEqual(reloaded.manifest.notebooks[0].name, "Recovered")

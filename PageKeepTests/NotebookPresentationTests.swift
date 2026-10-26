@@ -19,12 +19,13 @@ final class NotebookPresentationTests: XCTestCase {
         XCTAssertNotEqual(presentation.sheet?.id, originalID)
     }
 
-    func testNavigationIsDeliveredOnlyAfterSheetDismissal() {
+    func testNavigationIsDeliveredOnlyAfterSheetDismissal() throws {
         let presentation = NotebookPresentation()
         let notebookID = UUID()
         let pageID = UUID()
         presentation.show(.manage(notebookID))
-        presentation.finish(opening: notebookID, pageID: pageID)
+        let requestID = try XCTUnwrap(presentation.sheet?.id)
+        presentation.finish(opening: notebookID, pageID: pageID, requestID: requestID)
         XCTAssertNil(presentation.sheet)
         let destination = presentation.didDismiss()
         XCTAssertEqual(destination?.notebookID, notebookID)

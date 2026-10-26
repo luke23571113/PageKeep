@@ -24,7 +24,7 @@ final class LargeNotebookTests: XCTestCase {
         let started = Date()
         let prepared = try await repository.prepareImport(from: fixtureURL)
         let id = UUID()
-        var snapshot = try await repository.create(id: id, name: "100 pages", from: prepared)
+        var snapshot = try await repository.create(id: id, details: NotebookDetails(name: "100 pages"), from: [prepared])
         await repository.discardPrepared(prepared)
         let notebook = try XCTUnwrap(snapshot.manifest.notebooks.first { $0.id == id })
         let reversed = notebook.pages.reversed().map(\.id)
@@ -84,7 +84,7 @@ final class LargeNotebookTests: XCTestCase {
         let prepared = try await repository.prepareImport(from: sampleURL)
         defer { PDFService.discard(prepared) }
         for index in 0..<20 {
-            _ = try await repository.create(id: UUID(), name: "Benchmark \(index)", from: prepared)
+            _ = try await repository.create(id: UUID(), details: NotebookDetails(name: "Benchmark \(index)"), from: [prepared])
         }
         let validationStarted = Date()
         let snapshot = try await repository.load()
