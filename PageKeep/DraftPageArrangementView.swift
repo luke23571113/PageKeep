@@ -15,8 +15,8 @@ struct DraftPageArrangementView: View {
 
     private var pageIDs: [UUID] { draft.pages.map(\.id) }
     private var isBusy: Bool { draft.isSaving || store.isBusy }
-    private var notebook: Notebook? { notebookID.flatMap { store.notebook(id: $0) } }
-    private var savedURL: URL? { notebook.flatMap { store.pdfURL(for: $0) } }
+    private var notebook: Notebook? { draft.baseNotebook }
+    private var savedURL: URL? { draft.pinnedPDFURL }
 
     var body: some View {
         NavigationStack {

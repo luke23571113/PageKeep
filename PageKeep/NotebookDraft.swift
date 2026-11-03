@@ -8,11 +8,27 @@ final class NotebookDraft {
     private(set) var additions: [PreparedPDF]
     private(set) var pages: [DraftPage]
     private(set) var isSaving = false
+    private let versionID = UUID()
+    let baseNotebook: Notebook?
+    let pinnedPDFURL: URL?
+    private let ownedPDFURL: URL?
     private let originalDetails: NotebookDetails
     private let existingPages: [DraftPage]
     private var uneditedPages: [DraftPage]
 
-    init(details: NotebookDetails, additions: [PreparedPDF] = [], existingNotebook: Notebook? = nil) {
+    init(
+        details: NotebookDetails, additions: [PreparedPDF] = [],
+        existingNotebook: Notebook? = nil, savedURL: URL? = nil
+    ) {
+        baseNotebook = existingNotebook
+        // A hard link keeps the opened revision alive even after library cleanup.
+        if let savedURL, let pinned = Self.pinSource(savedURL) {
+            pinnedPDFURL = pinned
+            ownedPDFURL = pinned
+        } else {
+            pinnedPDFURL = nil
+            ownedPDFURL = nil
+        }
         self.details = details
         originalDetails = details
         self.additions = additions
@@ -24,6 +40,22 @@ final class NotebookDraft {
         let allPages = savedPages + incoming
         pages = allPages
         uneditedPages = allPages
+    }
+
+    deinit {
+        if let ownedPDFURL { try? FileManager.default.removeItem(at: ownedPDFURL.deletingLastPathComponent()) }
+    }
+
+    private static func pinSource(_ source: URL) -> URL? {
+        guard let destination = try? PDFService.makeStagingURL() else { return nil }
+        do {
+            do { try FileManager.default.linkItem(at: source, to: destination) }
+            catch { try FileManager.default.copyItem(at: source, to: destination) }
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: destination.deletingLastPathComponent())
+            return nil
+        }
     }
 
     var hasChanges: Bool { details != originalDetails || !additions.isEmpty || pageLayoutChanged }
@@ -79,7 +111,8 @@ final class NotebookDraft {
         let result = try await store.saveNotebook(
             details: details, notebookID: notebookID, additions: additions,
             pageLayout: pageLayoutChanged ? pages : nil,
-            expectedExistingPageIDs: pageLayoutChanged ? existingPages.map(\.id) : nil
+            expectedExistingPageIDs: pageLayoutChanged ? existingPages.map(\.id) : nil,
+            baseNotebook: baseNotebook, basePDFURL: pinnedPDFURL, draftVersionID: versionID
         )
         await clearPendingPages(in: store.repository)
         return result

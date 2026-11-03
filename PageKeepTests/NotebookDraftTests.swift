@@ -228,7 +228,7 @@ final class NotebookDraftTests: XCTestCase {
         await draft.discardPendingPages(in: store.repository)
     }
 
-    func testStaleArrangementCannotRemovePagesAddedAfterDraftOpened() async throws {
+    func testStaleArrangementPreservesBothSavedAndDraftPDFs() async throws {
         let store = LibraryStore(repository: LibraryRepository(rootURL: folder.appendingPathComponent("Library")))
         await store.load()
         let sample = try XCTUnwrap(store.notebooks.first)
@@ -240,12 +240,93 @@ final class NotebookDraftTests: XCTestCase {
         _ = try await store.appendPrepared(incoming, to: sample.id)
         let newer = try XCTUnwrap(store.notebook(id: sample.id))
         XCTAssertEqual(newer.pageCount, 4)
-        do { _ = try await draft.save(in: store, notebookID: sample.id); XCTFail("Expected stale arrangement") }
-        catch LibraryError.invalidChange { }
-        XCTAssertEqual(draft.pages, plan)
-        XCTAssertEqual(store.notebook(id: sample.id), newer)
+        let result = try await draft.save(in: store, notebookID: sample.id)
+        let saved = try XCTUnwrap(store.notebook(id: result.notebookID))
+        XCTAssertEqual(saved.pages.map(\.id), plan.map(\.id))
+        XCTAssertTrue(store.notebooks.contains { $0.contentVersionID == newer.contentVersionID })
+        XCTAssertEqual(store.notebooks.count, 2)
+        XCTAssertEqual(store.syncNotices.filter { $0.kind == .conflict }.count, 1)
         let reopened = try await store.repository.load()
-        XCTAssertEqual(reopened.manifest.notebooks.first, newer)
+        XCTAssertEqual(Set(reopened.manifest.notebooks.map(\.contentVersionID)), Set(store.notebooks.map(\.contentVersionID)))
+    }
+
+    func testRotationWithSamePageIDsCannotSilentlyReplaceActiveDraftSource() async throws {
+        let store = LibraryStore(repository: LibraryRepository(rootURL: folder.appendingPathComponent("Library")))
+        await store.load()
+        let sample = try XCTUnwrap(store.notebooks.first)
+        let source = try XCTUnwrap(store.pdfURL(for: sample))
+        let draft = NotebookDraft(details: sample.details, existingNotebook: sample, savedURL: source)
+        let pinned = try XCTUnwrap(draft.pinnedPDFURL)
+        let sourceBytes = try Data(contentsOf: pinned)
+        try draft.reorderPages(orderedIDs: sample.pages.reversed().map(\.id))
+        try await store.rotatePages(in: sample.id, ids: [sample.pages[0].id])
+        let rotated = try XCTUnwrap(store.notebook(id: sample.id))
+        XCTAssertEqual(rotated.pages, sample.pages)
+        XCTAssertNotEqual(rotated.contentVersionID, sample.contentVersionID)
+        XCTAssertEqual(try Data(contentsOf: pinned), sourceBytes)
+        let result = try await draft.save(in: store, notebookID: sample.id)
+        let arranged = try XCTUnwrap(store.notebook(id: result.notebookID))
+        XCTAssertEqual(arranged.pages.map(\.id), sample.pages.reversed().map(\.id))
+        XCTAssertTrue(store.notebooks.contains { $0.contentVersionID == rotated.contentVersionID })
+        XCTAssertEqual(store.notebooks.count, 2)
+    }
+
+    func testDraftMetadataSaveOnlyChangesFieldsEditedInDraft() async throws {
+        let store = LibraryStore(repository: LibraryRepository(rootURL: folder.appendingPathComponent("Library")))
+        await store.load()
+        let sample = try XCTUnwrap(store.notebooks.first)
+        let draft = NotebookDraft(details: sample.details, existingNotebook: sample)
+        draft.details.name = "My edit"
+        var remoteDetails = sample.details
+        remoteDetails.colorID = "green"
+        _ = try await store.repository.edit(sample.id, details: remoteDetails, appending: [])
+        await store.reload()
+        _ = try await draft.save(in: store, notebookID: sample.id)
+        let saved = try XCTUnwrap(store.notebook(id: sample.id))
+        XCTAssertEqual(saved.name, "My edit")
+        XCTAssertEqual(saved.colorID, "green")
+        XCTAssertEqual(saved.revisionID, sample.revisionID)
+        XCTAssertEqual(store.notebooks.count, 1)
+    }
+
+    func testDeletedNotebookRecoversChangedDraftButUnchangedDraftStaysDeleted() async throws {
+        let store = LibraryStore(repository: LibraryRepository(rootURL: folder.appendingPathComponent("Library")))
+        await store.load()
+        let sample = try XCTUnwrap(store.notebooks.first)
+        let unchanged = NotebookDraft(details: sample.details, existingNotebook: sample)
+        let edited = NotebookDraft(details: sample.details, existingNotebook: sample, savedURL: store.pdfURL(for: sample))
+        edited.details.colorID = "green"
+        try await store.deleteNotebook(sample.id)
+        do { _ = try await unchanged.save(in: store, notebookID: sample.id); XCTFail("An unchanged draft must stay deleted") }
+        catch LibraryError.notebookNotFound { }
+        XCTAssertTrue(store.notebooks.isEmpty)
+        let result = try await edited.save(in: store, notebookID: sample.id)
+        let recovered = try XCTUnwrap(store.notebook(id: result.notebookID))
+        XCTAssertNotEqual(recovered.id, sample.id)
+        XCTAssertTrue(recovered.name.hasSuffix("(Recovered)"))
+        XCTAssertEqual(recovered.colorID, "green")
+        XCTAssertEqual(recovered.revisionID, sample.revisionID)
+        let snapshot = try await store.repository.syncSnapshot()
+        XCTAssertEqual(snapshot.sync.tombstones.map(\.id), [sample.id])
+    }
+
+    func testPinnedSourceRemainsUsableAfterAcknowledgedOldRevisionIsCleaned() async throws {
+        let store = LibraryStore(repository: LibraryRepository(rootURL: folder.appendingPathComponent("Library")))
+        await store.load()
+        let sample = try XCTUnwrap(store.notebooks.first)
+        let source = try XCTUnwrap(store.pdfURL(for: sample))
+        let draft = NotebookDraft(details: sample.details, existingNotebook: sample, savedURL: source)
+        let pinned = try XCTUnwrap(draft.pinnedPDFURL)
+        try await store.rotatePages(in: sample.id, ids: [sample.pages[0].id])
+        try await store.rotatePages(in: sample.id, ids: [sample.pages[0].id])
+        let pending = try await store.repository.syncSnapshot()
+        try await store.acknowledgeSyncEntries(Set(pending.sync.outbox.map(\.id)))
+        try await store.acknowledgeSyncEntries([])
+        await store.reload()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pinned.path))
+        let document = try PDFService.validate(at: pinned)
+        XCTAssertEqual(document.pageCount, sample.pageCount)
     }
 
     private func makePDF(named name: String) throws -> URL {

@@ -119,7 +119,8 @@ actor LibraryRepository {
         let date = Date()
         var notebook = Notebook(
             id: id, name: name, createdAt: date, modifiedAt: date,
-            revisionID: nil, pages: [], symbolName: details.symbolName, colorID: details.colorID
+            revisionID: nil, pages: [], symbolName: details.symbolName, colorID: details.colorID,
+            folderID: validFolderID(details.folderID, in: next)
         )
         if let pageLayout {
             guard !pageLayout.isEmpty else { throw PDFError.emptyDocument }
@@ -136,23 +137,55 @@ actor LibraryRepository {
             try updatePDF(combined, notebook: &notebook)
         }
         next.notebooks.insert(notebook, at: 0)
+        next.itemOrder.insert(id, at: 0)
         return try commit(next)
     }
 
     func edit(
         _ id: UUID, details: NotebookDetails, appending additions: [PreparedPDF],
-        pageLayout: [DraftPage]? = nil, expectedExistingPageIDs: [UUID]? = nil
+        pageLayout: [DraftPage]? = nil, expectedExistingPageIDs: [UUID]? = nil,
+        baseNotebook: Notebook? = nil, basePDFURL: URL? = nil, draftVersionID: UUID? = nil
     ) throws -> LibrarySnapshot {
         var next = try loadedManifest()
+        if let baseNotebook {
+            let saved = next.notebooks.first { $0.id == id }
+            let contentEdited = pageLayout != nil || !additions.isEmpty
+            if saved == nil || (contentEdited && saved?.contentVersionID != baseNotebook.contentVersionID) {
+                return try saveDivergedDraft(
+                    baseNotebook, details: details, additions: additions, pageLayout: pageLayout,
+                    sourceURL: basePDFURL, versionID: draftVersionID ?? UUID(), current: next
+                )
+            }
+        }
         let index = try notebookIndex(id, in: next)
-        let name = try NotebookNaming.resolvedName(details.name, in: next.notebooks, excluding: id)
         let original = next.notebooks[index]
+        if let baseNotebook {
+            guard baseNotebook.id == id else { throw LibraryError.invalidChange }
+            if pageLayout != nil || !additions.isEmpty {
+                guard original.contentVersionID == baseNotebook.contentVersionID else { throw LibraryError.invalidChange }
+            }
+            // A draft only owns fields that the user actually changed.
+            next.notebooks[index].name = details.name == baseNotebook.name ? original.name :
+                try NotebookNaming.resolvedName(details.name, in: next.notebooks, excluding: id)
+            if details.symbolName != baseNotebook.symbolName { next.notebooks[index].symbolName = details.symbolName }
+            if details.colorID != baseNotebook.colorID { next.notebooks[index].colorID = details.colorID }
+            if details.folderID != baseNotebook.folderID {
+                next.notebooks[index].folderID = validFolderID(details.folderID, in: next)
+            }
+        } else {
+            next.notebooks[index].name = try NotebookNaming.resolvedName(details.name, in: next.notebooks, excluding: id)
+            next.notebooks[index].symbolName = details.symbolName
+            next.notebooks[index].colorID = details.colorID
+            if details.folderID != original.folderID {
+                next.notebooks[index].folderID = validFolderID(details.folderID, in: next)
+            }
+        }
+        if next.notebooks[index].folderID != original.folderID {
+            appendItem(id, in: &next)
+        }
         if pageLayout != nil, let expectedExistingPageIDs, expectedExistingPageIDs != original.pages.map(\.id) {
             throw LibraryError.invalidChange
         }
-        next.notebooks[index].name = name
-        next.notebooks[index].symbolName = details.symbolName
-        next.notebooks[index].colorID = details.colorID
         if let pageLayout {
             let documents = try additions.map { try preparedDocument($0) }
             let arranged = try PDFPageComposition.arrangedDocument(pageLayout, existingNotebook: original, existingDocument: document(for: original), additions: additions, documents: documents)
@@ -177,21 +210,157 @@ actor LibraryRepository {
         return try commit(next)
     }
 
+    private func saveDivergedDraft(
+        _ base: Notebook, details: NotebookDetails, additions: [PreparedPDF], pageLayout: [DraftPage]?,
+        sourceURL: URL?, versionID: UUID, current: LibraryManifest
+    ) throws -> LibrarySnapshot {
+        guard details != base.details || pageLayout != nil || !additions.isEmpty else {
+            throw LibraryError.notebookNotFound
+        }
+        var next = current
+        var branch = base
+        let clock = next.sync.nextClock()
+        if details.name != base.name {
+            guard !details.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw LibraryError.emptyName }
+            branch.name = details.name
+            branch.requestedName = details.name
+            branch.fieldClocks.name = clock
+        }
+        if details.symbolName != base.symbolName { branch.symbolName = details.symbolName; branch.fieldClocks.symbol = clock }
+        if details.colorID != base.colorID { branch.colorID = details.colorID; branch.fieldClocks.color = clock }
+        if details.folderID != base.folderID {
+            branch.folderID = validFolderID(details.folderID, in: next)
+            branch.fieldClocks.folder = clock
+        }
+        if pageLayout != nil || !additions.isEmpty {
+            let source: PDFDocument
+            if base.pages.isEmpty { source = PDFDocument() }
+            else if let sourceURL {
+                source = try PDFService.validate(at: sourceURL)
+                guard source.pageCount == base.pageCount else { throw LibraryError.pageCountMismatch }
+            } else { source = try document(for: base) }
+            let documents = try additions.map { try preparedDocument($0) }
+            let output: PDFDocument
+            if let pageLayout {
+                output = try PDFPageComposition.arrangedDocument(
+                    pageLayout, existingNotebook: base, existingDocument: source,
+                    additions: additions, documents: documents
+                )
+                branch.pages = pageLayout.map { NotebookPage(id: $0.id) }
+            } else {
+                output = source
+                try PDFPageComposition.append(documents, to: output, notebook: &branch)
+            }
+            try updatePDF(output, notebook: &branch)
+            branch.contentVersionID = versionID
+            branch.contentAncestors.insert(base.contentVersionID)
+            branch.contentHistory.append(NotebookContentVersion(
+                id: versionID, parentIDs: [base.contentVersionID], revisionID: branch.revisionID, pages: branch.pages
+            ))
+        }
+        if !branch.pages.isEmpty, let destination = pdfURL(for: branch),
+           !fileManager.fileExists(atPath: destination.path) {
+            guard let sourceURL else { throw LibraryError.missingPDF }
+            let source = try PDFService.validate(at: sourceURL)
+            guard source.pageCount == branch.pageCount else { throw LibraryError.pageCountMismatch }
+            let temporary = destination.deletingPathExtension().appendingPathExtension("pending")
+            do {
+                try fileManager.copyItem(at: sourceURL, to: temporary)
+                try files.moveAtomically(from: temporary, to: destination)
+            } catch {
+                try? fileManager.removeItem(at: temporary)
+                throw error
+            }
+        }
+        branch.modifiedAt = Date()
+        let incoming = LibraryManifest(notebooks: [branch], folders: next.folders, sync: next.sync)
+        next = LibraryReconciliation.merge(next, with: incoming)
+        let saved = next.notebooks.first { $0.contentVersionID == branch.contentVersionID && $0.id != base.id }
+            ?? next.notebooks.first { $0.contentVersionID == branch.contentVersionID }
+        guard let saved else { throw LibraryError.invalidChange }
+        for notebook in next.notebooks where current.notebooks.first(where: { $0.id == notebook.id }) != notebook {
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: notebook, tombstone: nil, move: nil, clock: SyncClock(counter: next.sync.logicalClock, deviceID: next.sync.deviceID)))
+        }
+        var snapshot = try commit(next, recordingLocalChanges: false)
+        snapshot.savedNotebookID = saved.id
+        return snapshot
+    }
+
+    func createFolder(id: UUID = UUID(), name: String) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        guard !next.itemOrder.contains(id), !next.sync.folderTombstones.contains(where: { $0.id == id }) else { throw LibraryError.invalidChange }
+        let resolved = try NotebookNaming.resolvedFolderName(name, in: next.folders)
+        next.folders.append(NotebookFolder(id: id, name: resolved))
+        next.itemOrder.append(id)
+        return try commit(next)
+    }
+
+    func renameFolder(_ id: UUID, name: String) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        guard let index = next.folders.firstIndex(where: { $0.id == id }) else { throw LibraryError.folderNotFound }
+        next.folders[index].name = try NotebookNaming.resolvedFolderName(name, in: next.folders, excluding: id)
+        guard next.folders[index] != manifest?.folders.first(where: { $0.id == id }) else { return snapshot(for: next) }
+        return try commit(next)
+    }
+
+    func deleteFolder(_ id: UUID) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        guard next.folders.contains(where: { $0.id == id }) else { throw LibraryError.folderNotFound }
+        let children = next.itemIDs(in: id, includingArchived: true)
+        next.folders.removeAll { $0.id == id }
+        for index in next.notebooks.indices where next.notebooks[index].folderID == id {
+            next.notebooks[index].folderID = nil
+            next.notebooks[index].modifiedAt = Date()
+        }
+        next.itemOrder.removeAll { $0 == id || children.contains($0) }
+        next.itemOrder.append(contentsOf: children)
+        return try commit(next)
+    }
+
+    func moveNotebook(_ id: UUID, toFolderID folderID: UUID?) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        if let folderID, !next.folders.contains(where: { $0.id == folderID }) { throw LibraryError.folderNotFound }
+        let index = try notebookIndex(id, in: next)
+        guard next.notebooks[index].folderID != folderID else { return snapshot(for: next) }
+        next.notebooks[index].folderID = folderID
+        next.notebooks[index].modifiedAt = Date()
+        appendItem(id, in: &next)
+        return try commit(next)
+    }
+
+    func reorderItems(inFolderID folderID: UUID?, orderedIDs: [UUID]) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        if let folderID, !next.folders.contains(where: { $0.id == folderID }) { throw LibraryError.folderNotFound }
+        let activeIDs = next.itemIDs(in: folderID)
+        guard orderedIDs.count == activeIDs.count, Set(orderedIDs).count == orderedIDs.count,
+              Set(orderedIDs) == Set(activeIDs) else { throw LibraryError.invalidChange }
+        guard orderedIDs != activeIDs else { return snapshot(for: next) }
+        replaceOrder(activeIDs, with: orderedIDs, in: &next)
+        return try commit(next)
+    }
+
     func reorderNotebooks(orderedActiveIDs: [UUID]) throws -> LibrarySnapshot {
         var next = try loadedManifest()
-        let active = next.notebooks.filter { !$0.isArchived }
-        guard orderedActiveIDs.count == active.count,
-              Set(orderedActiveIDs).count == orderedActiveIDs.count,
-              Set(orderedActiveIDs) == Set(active.map(\.id)) else { throw LibraryError.invalidChange }
-        guard orderedActiveIDs != active.map(\.id) else { return snapshot(for: next) }
-        let byID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
-        var position = 0
-        for index in next.notebooks.indices where !next.notebooks[index].isArchived {
-            guard let notebook = byID[orderedActiveIDs[position]] else { throw LibraryError.invalidChange }
-            next.notebooks[index] = notebook
-            position += 1
-        }
+        let activeIDs = next.notebooks.filter { !$0.isArchived }.map(\.id)
+        guard orderedActiveIDs.count == activeIDs.count, Set(orderedActiveIDs).count == orderedActiveIDs.count,
+              Set(orderedActiveIDs) == Set(activeIDs) else { throw LibraryError.invalidChange }
+        guard orderedActiveIDs != activeIDs else { return snapshot(for: next) }
+        replaceOrder(activeIDs, with: orderedActiveIDs, in: &next)
         return try commit(next)
+    }
+
+    private func validFolderID(_ id: UUID?, in manifest: LibraryManifest) -> UUID? {
+        id.flatMap { id in manifest.folders.contains(where: { $0.id == id }) ? id : nil }
+    }
+
+    private func appendItem(_ id: UUID, in manifest: inout LibraryManifest) {
+        manifest.itemOrder.removeAll { $0 == id }
+        manifest.itemOrder.append(id)
+    }
+
+    private func replaceOrder(_ ids: [UUID], with orderedIDs: [UUID], in manifest: inout LibraryManifest) {
+        let slots = manifest.itemOrder.indices.filter { ids.contains(manifest.itemOrder[$0]) }
+        for (slot, id) in zip(slots, orderedIDs) { manifest.itemOrder[slot] = id }
     }
 
     func setArchived(_ archived: Bool, ids: Set<UUID>) throws -> LibrarySnapshot {
@@ -223,6 +392,7 @@ actor LibraryRepository {
         var next = try loadedManifest()
         let index = try notebookIndex(id, in: next)
         next.notebooks.remove(at: index)
+        next.itemOrder.removeAll { $0 == id }
         return try commit(next)
     }
 
@@ -298,6 +468,167 @@ actor LibraryRepository {
         } catch {
             try? fileManager.removeItem(at: folder)
             throw error
+        }
+    }
+
+    func prepareForSync() throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        guard next.sync.needsBootstrap else { return snapshot(for: next) }
+        for notebook in next.notebooks where !next.sync.outbox.contains(where: { $0.notebook == notebook }) {
+            let clock = next.sync.nextClock()
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: notebook, tombstone: nil, move: nil, clock: clock))
+        }
+        for folder in next.folders where !next.sync.outbox.contains(where: { $0.folder == folder }) {
+            let clock = next.sync.nextClock()
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: nil, tombstone: nil, move: nil, clock: clock, folder: folder))
+        }
+        next.sync.needsBootstrap = false
+        return try commit(next, recordingLocalChanges: false)
+    }
+
+    func resetSyncForNewAccount() throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        next.sync = LibrarySyncState()
+        next.sync.baseOrder = next.itemOrder
+        for index in next.folders.indices { next.folders[index].nameClock = SyncClock() }
+        for index in next.notebooks.indices {
+            next.notebooks[index].contentAncestors = []
+            next.notebooks[index].contentHistory = []
+            next.notebooks[index].conflictOriginID = nil
+            next.notebooks[index].recoverySourceID = nil
+            next.notebooks[index].fieldClocks = NotebookFieldClocks()
+        }
+        recordLocalChanges(from: LibraryManifest(notebooks: [], sync: next.sync), in: &next)
+        return try commit(next, recordingLocalChanges: false)
+    }
+
+    func syncSnapshot() throws -> LibraryManifest {
+        try loadedManifest()
+    }
+
+    func acknowledgeSyncEntries(_ ids: Set<UUID>) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        next.sync.outbox.removeAll { ids.contains($0.id) }
+        return try commit(next, recordingLocalChanges: false)
+    }
+
+    func dismissSyncNotice(_ id: UUID) throws -> LibrarySnapshot {
+        var next = try loadedManifest()
+        next.sync.notices.removeAll { $0.id == id }
+        next.sync.dismissedNoticeIDs.insert(id)
+        return try commit(next, recordingLocalChanges: false)
+    }
+
+    func reconcile(with remote: LibraryManifest, downloadedPDFs: [UUID: URL]) throws -> LibrarySnapshot {
+        let current = try loadedManifest()
+        try files.validate(remote)
+        try files.validateCompatibleVersions([current, remote])
+        var next = LibraryReconciliation.merge(current, with: remote)
+        for notebook in next.notebooks where !notebook.pages.isEmpty {
+            guard let revision = notebook.revisionID, let destination = pdfURL(for: notebook) else {
+                throw LibraryError.missingPDF
+            }
+            if !fileManager.fileExists(atPath: destination.path) {
+                guard let source = downloadedPDFs[revision] else { throw LibraryError.missingPDF }
+                let incoming = try PDFService.validate(at: source)
+                guard incoming.pageCount == notebook.pageCount else { throw LibraryError.pageCountMismatch }
+                let temporary = files.pdfFolder.appendingPathComponent("\(revision.uuidString).pending")
+                do {
+                    try fileManager.copyItem(at: source, to: temporary)
+                    let copied = try PDFService.validate(at: temporary)
+                    guard copied.pageCount == notebook.pageCount else { throw LibraryError.pageCountMismatch }
+                    try files.moveAtomically(from: temporary, to: destination)
+                    try failureInjector?(.afterCandidatePDF)
+                } catch {
+                    try? fileManager.removeItem(at: temporary)
+                    throw error
+                }
+            }
+            _ = try document(for: notebook)
+        }
+        // Recovered/conflict copies must also be uploaded; their IDs make retries repeatable.
+        let currentIDs = Set(current.notebooks.map(\.id))
+        let remoteIDs = Set(remote.notebooks.map(\.id))
+        for notebook in next.notebooks {
+            // The cloud inbox can derive a copy before it has its own uploaded record.
+            let isPreservedCopy = notebook.conflictOriginID != nil || notebook.recoverySourceID != nil
+            guard !currentIDs.contains(notebook.id), !remoteIDs.contains(notebook.id) || isPreservedCopy else { continue }
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: notebook, tombstone: nil, move: nil, clock: SyncClock(counter: next.sync.logicalClock, deviceID: next.sync.deviceID)))
+        }
+        return try commit(next, recordingLocalChanges: false)
+    }
+
+    private func recordLocalChanges(from previous: LibraryManifest, in next: inout LibraryManifest) {
+        let old = Dictionary(uniqueKeysWithValues: previous.notebooks.map { ($0.id, $0) })
+        let currentIDs = Set(next.notebooks.map(\.id))
+        for index in next.notebooks.indices {
+            let before = old[next.notebooks[index].id]
+            guard before != next.notebooks[index] else { continue }
+            let clock = next.sync.nextClock()
+            if let before {
+                if before.revisionID != next.notebooks[index].revisionID || before.pages != next.notebooks[index].pages {
+                    next.notebooks[index].contentAncestors.insert(before.contentVersionID)
+                    next.notebooks[index].contentVersionID = UUID()
+                }
+            } else {
+                next.notebooks[index].contentVersionID = UUID()
+            }
+            if before?.contentVersionID != next.notebooks[index].contentVersionID {
+                let version = NotebookContentVersion(
+                    id: next.notebooks[index].contentVersionID,
+                    parentIDs: before.map { [$0.contentVersionID] } ?? [],
+                    revisionID: next.notebooks[index].revisionID, pages: next.notebooks[index].pages
+                )
+                if before == nil { next.notebooks[index].contentHistory = [] }
+                next.notebooks[index].contentHistory.append(version)
+            }
+            if before?.name != next.notebooks[index].name {
+                next.notebooks[index].fieldClocks.name = clock
+                next.notebooks[index].requestedName = next.notebooks[index].name
+            }
+            if before?.symbolName != next.notebooks[index].symbolName { next.notebooks[index].fieldClocks.symbol = clock }
+            if before?.colorID != next.notebooks[index].colorID { next.notebooks[index].fieldClocks.color = clock }
+            if before?.isArchived != next.notebooks[index].isArchived { next.notebooks[index].fieldClocks.archived = clock }
+            if before?.folderID != next.notebooks[index].folderID { next.notebooks[index].fieldClocks.folder = clock }
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: next.notebooks[index], tombstone: nil, move: nil, clock: clock))
+        }
+        for notebook in previous.notebooks where !currentIDs.contains(notebook.id) {
+            let tombstone = NotebookTombstone(notebook: notebook, clock: next.sync.nextClock())
+            next.sync.tombstones.removeAll { $0.id == notebook.id }
+            next.sync.tombstones.append(tombstone)
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: nil, tombstone: tombstone, move: nil, clock: tombstone.clock))
+        }
+        let oldFolders = Dictionary(uniqueKeysWithValues: previous.folders.map { ($0.id, $0) })
+        for index in next.folders.indices {
+            let folder = next.folders[index]
+            guard oldFolders[folder.id] != folder else { continue }
+            let clock = next.sync.nextClock()
+            next.folders[index].nameClock = clock
+            next.folders[index].requestedName = folder.name
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: nil, tombstone: nil, move: nil,
+                                                  clock: clock, folder: next.folders[index]))
+        }
+        for folder in previous.folders where !next.folders.contains(where: { $0.id == folder.id }) {
+            let tombstone = FolderTombstone(id: folder.id, clock: next.sync.nextClock())
+            next.sync.folderTombstones.removeAll { $0.id == folder.id }
+            next.sync.folderTombstones.append(tombstone)
+            next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: nil, tombstone: nil, move: nil,
+                                                  clock: tombstone.clock, folderTombstone: tombstone))
+        }
+        let groups: [UUID?] = [nil] + Set(previous.folders.map(\.id) + next.folders.map(\.id)).sorted { $0.uuidString < $1.uuidString }.map { Optional($0) }
+        for folderID in groups {
+            let ordered = next.itemIDs(in: folderID, includingArchived: true)
+            guard previous.itemIDs(in: folderID, includingArchived: true) != ordered else { continue }
+            var beforeID: UUID?
+            for id in ordered.reversed() {
+                let move = NotebookOrderMove(
+                    id: UUID(), notebookID: id, beforeID: beforeID, eligibleIDs: Set(ordered),
+                    clock: next.sync.nextClock(), includesArchived: true, scoped: true, folderID: folderID
+                )
+                next.sync.orderMoves.append(move)
+                next.sync.outbox.append(SyncOutboxEntry(id: UUID(), notebook: nil, tombstone: nil, move: move, clock: move.clock))
+                beforeID = id
+            }
         }
     }
 
@@ -393,7 +724,14 @@ actor LibraryRepository {
         }
     }
 
-    private func commit(_ next: LibraryManifest) throws -> LibrarySnapshot {
+    private func commit(_ proposed: LibraryManifest, recordingLocalChanges: Bool = true) throws -> LibrarySnapshot {
+        var next = proposed
+        let byID = Dictionary(uniqueKeysWithValues: next.notebooks.map { ($0.id, $0) })
+        next.notebooks = next.itemOrder.compactMap { byID[$0] }
+        if recordingLocalChanges {
+            recordLocalChanges(from: try loadedManifest(), in: &next)
+        }
+        try files.validate(next)
         let data = try files.encode(next)
         let previous = try Data(contentsOf: files.currentURL)
         try failureInjector?(.beforeBackup)
@@ -422,7 +760,9 @@ actor LibraryRepository {
                 id: UUID(), name: "Welcome to PageKeep", createdAt: date, modifiedAt: date,
                 revisionID: revision, pages: (0..<3).map { _ in NotebookPage() }
             )
-            let initial = try files.encode(LibraryManifest(notebooks: [sample]))
+            var initialManifest = LibraryManifest(notebooks: [sample])
+            recordLocalChanges(from: LibraryManifest(notebooks: [], sync: initialManifest.sync), in: &initialManifest)
+            let initial = try files.encode(initialManifest)
             try initial.write(to: staging.appendingPathComponent("manifest.json"))
             try initial.write(to: staging.appendingPathComponent("manifest.backup.json"))
             try failureInjector?(.beforeInitialInstall)
@@ -435,7 +775,8 @@ actor LibraryRepository {
     }
 
     private func cleanUnusedPDFs(current: LibraryManifest, backup: LibraryManifest?) {
-        let referenced = Set((current.notebooks + (backup?.notebooks ?? [])).compactMap(\.revisionID).map { "\($0.uuidString).pdf" })
+        let queued = (current.sync.outbox + (backup?.sync.outbox ?? [])).compactMap(\.notebook)
+        let referenced = Set((current.notebooks + (backup?.notebooks ?? []) + queued).compactMap(\.revisionID).map { "\($0.uuidString).pdf" })
         guard let files = try? fileManager.contentsOfDirectory(at: files.pdfFolder, includingPropertiesForKeys: nil) else { return }
         for file in files where !referenced.contains(file.lastPathComponent) {
             if file.pathExtension == "pdf" || file.pathExtension == "pending" {
@@ -477,6 +818,7 @@ enum LibraryError: LocalizedError {
     case newerSchema
     case recoveryUnavailable
     case notebookNotFound
+    case folderNotFound
     case missingPDF
     case pageCountMismatch
     case emptyName
@@ -488,6 +830,7 @@ enum LibraryError: LocalizedError {
         case .damagedManifest: "The notebook library could not be read. Your saved files have been kept."
         case .newerSchema: "This library was saved by a newer version of PageKeep. Update the app to open it."
         case .recoveryUnavailable: "A complete library backup is not available."
+        case .folderNotFound: "This folder could not be found."
         case .notebookNotFound: "This notebook could not be found."
         case .missingPDF: "The saved PDF is missing. You can delete this notebook or restore its file from a device backup."
         case .pageCountMismatch: "The saved PDF does not match this notebook's page list."

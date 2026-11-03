@@ -1,5 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
 import UIKit
+#endif
 
 enum NotebookAppearance {
     struct Symbol: Identifiable {
@@ -42,9 +46,14 @@ enum NotebookAppearance {
     ]
 
     static func symbol(_ name: String) -> String {
-        guard symbols.contains(where: { $0.id == name }), UIImage(systemName: name) != nil else {
+        guard symbols.contains(where: { $0.id == name }) else {
             return "book.closed"
         }
+#if os(macOS)
+        guard NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil else { return "book.closed" }
+#else
+        guard UIImage(systemName: name) != nil else { return "book.closed" }
+#endif
         return name
     }
 

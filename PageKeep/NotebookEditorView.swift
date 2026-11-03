@@ -6,6 +6,7 @@ struct NotebookEditorView: View {
     let onSaved: (UUID, UUID?) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(FolderExpansionStore.self) private var folderExpansion
     @State private var draft: NotebookDraft
     @State private var source: EditorSource?
     @State private var showsPageArrangement = false
@@ -25,7 +26,7 @@ struct NotebookEditorView: View {
         self.onSaved = onSaved
         let notebook = store.notebook(id: notebookID)
         let details = notebook?.details ?? NotebookDetails(name: "Untitled Notebook")
-        _draft = State(initialValue: NotebookDraft(details: details, existingNotebook: notebook))
+        _draft = State(initialValue: NotebookDraft(details: details, existingNotebook: notebook, savedURL: notebook.flatMap { store.pdfURL(for: $0) }))
     }
 
     init(store: LibraryStore, draft: NotebookDraft, onSaved: @escaping (UUID, UUID?) -> Void) {
@@ -49,10 +50,10 @@ struct NotebookEditorView: View {
     }
 
     private var previewRequest: DraftPreviewRequest {
-        let notebook = notebookID.flatMap { store.notebook(id: $0) }
+        let notebook = draft.baseNotebook
         return DraftPreviewRequest(
             pages: draft.pages, notebook: notebook,
-            savedURL: notebook.flatMap { store.pdfURL(for: $0) }, additions: draft.additions
+            savedURL: draft.pinnedPDFURL, additions: draft.additions
         )
     }
 
@@ -105,6 +106,9 @@ struct NotebookEditorView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                }
+                Section("Folder") {
+                    FolderPicker(store: store, selection: $draft.details.folderID)
                 }
                 NotebookAppearancePicker(draft: draft)
                 if let errorMessage {
@@ -233,9 +237,14 @@ struct NotebookEditorView: View {
         guard !isSaving, !isPresentingChild, !store.isBusy, canSave else { return }
         isCompleting = true
         errorMessage = nil
+        let changedFolder = notebookID == nil || draft.details.folderID != draft.baseNotebook?.folderID
         Task {
             do {
                 let result = try await draft.save(in: store, notebookID: notebookID)
+                if changedFolder, let notebook = store.notebook(id: result.notebookID),
+                   let folderID = store.effectiveFolderID(for: notebook) {
+                    folderExpansion.setExpanded(true, for: folderID)
+                }
                 onSaved(result.notebookID, result.firstAddedPageID)
             } catch {
                 isCompleting = false

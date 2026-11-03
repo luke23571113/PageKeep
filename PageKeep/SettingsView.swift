@@ -34,16 +34,7 @@ struct SettingsView: View {
                     }
                     .accessibilityIdentifier("settings.archive")
                 }
-                Section {
-                    Toggle(isOn: .constant(false)) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("iCloud Sync")
-                            Text("Coming in V3").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(true)
-                    .accessibilityIdentifier("settings.cloudSync")
-                }
+                SyncSettingsSection(store: store)
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

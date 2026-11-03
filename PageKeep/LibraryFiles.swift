@@ -23,30 +23,110 @@ struct LibraryFiles {
             guard let legacy = try? JSONDecoder().decode(LegacyLibraryManifest.self, from: data),
                   legacy.initialized else { throw LibraryError.damagedManifest }
             decoded = legacy.migrated()
-        case 2:
+        case 2, 3, 4:
             guard let current = try? JSONDecoder().decode(LibraryManifest.self, from: data),
                   current.initialized else { throw LibraryError.damagedManifest }
             decoded = current
-        case 3...:
+        case 5...:
             throw LibraryError.newerSchema
         default:
             throw LibraryError.damagedManifest
         }
-        guard Set(decoded.notebooks.map(\.id)).count == decoded.notebooks.count else {
+        if version.schemaVersion >= 3 {
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["sync"] != nil,
+                  let notebooks = object["notebooks"] as? [[String: Any]],
+                  notebooks.allSatisfy({ $0["contentVersionID"] != nil && $0["contentHistory"] != nil && $0["fieldClocks"] != nil }) else {
+                throw LibraryError.damagedManifest
+            }
+        }
+        if version.schemaVersion == 4 {
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["folders"] != nil, object["itemOrder"] != nil else { throw LibraryError.damagedManifest }
+        }
+        try validate(decoded)
+        return decoded
+    }
+
+    func validate(_ manifest: LibraryManifest) throws {
+        guard manifest.schemaVersion == 4, manifest.initialized,
+              Set(manifest.notebooks.map(\.id)).count == manifest.notebooks.count,
+              Set(manifest.sync.tombstones.map(\.id)).count == manifest.sync.tombstones.count,
+              Set(manifest.sync.outbox.map(\.id)).count == manifest.sync.outbox.count,
+              Set(manifest.sync.orderMoves.map(\.id)).count == manifest.sync.orderMoves.count else {
             throw LibraryError.damagedManifest
         }
-        var revisions = Set<UUID>()
-        for notebook in decoded.notebooks {
+        let itemIDs = manifest.notebooks.map(\.id) + manifest.folders.map(\.id)
+        guard Set(itemIDs).count == itemIDs.count,
+              manifest.itemOrder.count == itemIDs.count,
+              Set(manifest.itemOrder) == Set(itemIDs),
+              Set(manifest.sync.folderTombstones.map(\.id)).count == manifest.sync.folderTombstones.count,
+              Set(manifest.folders.map(\.id)).isDisjoint(with: manifest.sync.folderTombstones.map(\.id)) else {
+            throw LibraryError.damagedManifest
+        }
+        for folder in manifest.folders + manifest.sync.outbox.compactMap(\.folder) {
+            guard !folder.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw LibraryError.damagedManifest }
+        }
+        try validateCompatibleVersions([manifest])
+        let notebooks = manifest.notebooks + manifest.sync.tombstones.map(\.notebook) + manifest.sync.outbox.compactMap(\.notebook)
+        var versions: [UUID: NotebookContentVersion] = [:]
+        for notebook in notebooks {
             guard !notebook.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   Set(notebook.pages.map(\.id)).count == notebook.pages.count,
-                  notebook.pages.isEmpty == (notebook.revisionID == nil) else {
+                  notebook.pages.isEmpty == (notebook.revisionID == nil),
+                  !notebook.contentAncestors.contains(notebook.contentVersionID),
+                  let current = notebook.contentHistory.first(where: { $0.id == notebook.contentVersionID }),
+                  current.pages == notebook.pages, current.revisionID == notebook.revisionID else {
                 throw LibraryError.damagedManifest
             }
-            if let revision = notebook.revisionID, !revisions.insert(revision).inserted {
-                throw LibraryError.damagedManifest
+            var records: [UUID: NotebookContentVersion] = [:]
+            for version in notebook.contentHistory {
+                guard records[version.id] == nil,
+                      versions[version.id] == nil || versions[version.id] == version,
+                      !version.parentIDs.contains(version.id), version.parentIDs.count <= 1,
+                      version.pages.isEmpty == (version.revisionID == nil),
+                      Set(version.pages.map(\.id)).count == version.pages.count else {
+                    throw LibraryError.damagedManifest
+                }
+                records[version.id] = version
+                versions[version.id] = version
+            }
+            var resolved = Set(records.values.filter { $0.parentIDs.isEmpty }.map(\.id))
+            while true {
+                let ready = records.values.filter { $0.parentIDs.isSubset(of: resolved) }.map(\.id)
+                let expanded = resolved.union(ready)
+                if expanded == resolved { break }
+                resolved = expanded
+            }
+            guard resolved.count == records.count else { throw LibraryError.damagedManifest }
+            var ancestors = Set<UUID>()
+            var pending = Array(current.parentIDs)
+            while let id = pending.popLast() {
+                guard id != current.id, let record = records[id] else { throw LibraryError.damagedManifest }
+                if ancestors.insert(id).inserted { pending.append(contentsOf: record.parentIDs) }
+            }
+            guard ancestors == notebook.contentAncestors else { throw LibraryError.damagedManifest }
+        }
+        for entry in manifest.sync.outbox {
+            let count = (entry.notebook == nil ? 0 : 1) + (entry.tombstone == nil ? 0 : 1) + (entry.move == nil ? 0 : 1) + (entry.folder == nil ? 0 : 1) + (entry.folderTombstone == nil ? 0 : 1)
+            guard count == 1 else { throw LibraryError.damagedManifest }
+        }
+    }
+
+    func validateCompatibleVersions(_ manifests: [LibraryManifest]) throws {
+        var versions: [UUID: NotebookContentVersion] = [:]
+        var revisions: [UUID: [NotebookPage]] = [:]
+        for manifest in manifests {
+            let notebooks = manifest.notebooks + manifest.sync.tombstones.map(\.notebook) + manifest.sync.outbox.compactMap(\.notebook)
+            for version in notebooks.flatMap(\.contentHistory) {
+                guard versions[version.id] == nil || versions[version.id] == version else { throw LibraryError.damagedManifest }
+                versions[version.id] = version
+                if let revision = version.revisionID {
+                    guard revisions[revision] == nil || revisions[revision] == version.pages else { throw LibraryError.damagedManifest }
+                    revisions[revision] = version.pages
+                }
             }
         }
-        return decoded
     }
 
     func shareFileName(_ name: String) -> String {

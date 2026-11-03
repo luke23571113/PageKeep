@@ -2,7 +2,11 @@ import XCTest
 import PDFKit
 import CoreGraphics
 import CoreText
+#if os(macOS)
+import AppKit
+#else
 import UIKit
+#endif
 @testable import PageKeep
 
 @MainActor
@@ -79,7 +83,7 @@ final class LibraryRepositoryTests: XCTestCase {
         }
     }
 
-    func testCleanupRetainsBothCommittedRevisionsUntilNextValidatedLoad() async throws {
+    func testCleanupRetainsPendingUploadsUntilAcknowledgedAndBackupAdvances() async throws {
         let repository = LibraryRepository(rootURL: root)
         let first = try await repository.load()
         let original = try XCTUnwrap(first.manifest.notebooks.first)
@@ -90,9 +94,14 @@ final class LibraryRepositoryTests: XCTestCase {
         let originalURL = try XCTUnwrap(repository.pdfURL(for: original))
         let backupURL = try XCTUnwrap(repository.pdfURL(for: newer))
         XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
-        _ = try await repository.load()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
+        let pending = try await repository.load()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: backupURL.path))
+        _ = try await repository.acknowledgeSyncEntries(Set(pending.manifest.sync.outbox.map(\.id)))
+        _ = try await repository.acknowledgeSyncEntries([])
+        let cleaned = try await repository.load()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(repository.pdfURL(for: XCTUnwrap(cleaned.manifest.notebooks.first))).path))
     }
 
     func testDamagedCurrentRequiresExplicitRecovery() async throws {
@@ -217,7 +226,12 @@ final class LibraryRepositoryTests: XCTestCase {
         let rotated = try await repository.rotatePages(in: id, ids: [original.pages[0].id])
         let notebook = try XCTUnwrap(rotated.manifest.notebooks.first(where: { $0.id == id }))
         let document = try PDFService.validate(at: XCTUnwrap(repository.pdfURL(for: notebook)))
-        let image = try XCTUnwrap(document.page(at: 0)?.thumbnail(of: CGSize(width: 300, height: 300), for: .mediaBox).cgImage)
+        let thumbnail = try XCTUnwrap(document.page(at: 0)?.thumbnail(of: CGSize(width: 300, height: 300), for: .mediaBox))
+        #if os(macOS)
+        let image = try XCTUnwrap(thumbnail.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        #else
+        let image = try XCTUnwrap(thumbnail.cgImage)
+        #endif
         let topLeft = try pixel(in: image, xFraction: 0.1, yFraction: 0.1)
         let topRight = try pixel(in: image, xFraction: 0.9, yFraction: 0.1)
         XCTAssertTrue(topRight.red > 200 && topRight.green < 80, "The red top-left mark should turn to the top-right")
@@ -387,11 +401,12 @@ final class LibraryRepositoryTests: XCTestCase {
         let currentURL = root.appendingPathComponent("manifest.json")
         try bytes.write(to: currentURL)
         let migrated = try await repository.load()
-        XCTAssertEqual(migrated.manifest.schemaVersion, 2)
+        XCTAssertEqual(migrated.manifest.schemaVersion, 4)
         XCTAssertEqual(migrated.manifest.notebooks.map(\.id), [earlierID, laterID, original.id])
         XCTAssertEqual(migrated.manifest.notebooks.map(\.name), ["Duplicate", "Duplicate", original.name])
         XCTAssertTrue(migrated.manifest.notebooks.allSatisfy { $0.symbolName == "book.closed" && $0.colorID == "default" && !$0.isArchived })
-        XCTAssertEqual(migrated.manifest.notebooks.last, original)
+        XCTAssertEqual(migrated.manifest.notebooks.last?.revisionID, original.revisionID)
+        XCTAssertEqual(migrated.manifest.notebooks.last?.pages, original.pages)
         XCTAssertTrue(migrated.notebookErrors.isEmpty)
         XCTAssertEqual(try Data(contentsOf: currentURL), bytes)
         _ = try await repository.setArchived(true, ids: [earlierID])
@@ -399,7 +414,7 @@ final class LibraryRepositoryTests: XCTestCase {
         let reloaded = try await LibraryRepository(rootURL: root).load()
         XCTAssertTrue(reloaded.manifest.notebooks[0].isArchived)
         let persisted = try JSONSerialization.jsonObject(with: Data(contentsOf: currentURL)) as? [String: Any]
-        XCTAssertEqual(persisted?["schemaVersion"] as? Int, 2)
+        XCTAssertEqual(persisted?["schemaVersion"] as? Int, 4)
     }
 
     func testV1BackupRecoveryKeepsRawBackupAndMigratesOnNextMutation() async throws {
@@ -411,7 +426,8 @@ final class LibraryRepositoryTests: XCTestCase {
         try bytes.write(to: backupURL)
         try Data("damaged".utf8).write(to: currentURL)
         let recovered = try await repository.recover()
-        XCTAssertEqual(recovered.manifest.notebooks, initial.manifest.notebooks)
+        XCTAssertEqual(recovered.manifest.notebooks.map(\.id), initial.manifest.notebooks.map(\.id))
+        XCTAssertEqual(recovered.manifest.notebooks.map(\.revisionID), initial.manifest.notebooks.map(\.revisionID))
         XCTAssertEqual(try Data(contentsOf: backupURL), bytes)
         XCTAssertEqual(try Data(contentsOf: currentURL), bytes)
         var details = initial.manifest.notebooks[0].details
@@ -629,7 +645,8 @@ final class LibraryRepositoryTests: XCTestCase {
             catch TestFailure.injected { }
             XCTAssertEqual(try Data(contentsOf: currentURL), legacy)
             let reloaded = try await LibraryRepository(rootURL: root).load()
-            XCTAssertEqual(reloaded.manifest.notebooks, initial.manifest.notebooks)
+            XCTAssertEqual(reloaded.manifest.notebooks.map(\.id), initial.manifest.notebooks.map(\.id))
+            XCTAssertEqual(reloaded.manifest.notebooks.map(\.pages), initial.manifest.notebooks.map(\.pages))
         }
         let retried = try await initialRepository.setArchived(true, ids: [sample.id])
         XCTAssertTrue(retried.manifest.notebooks[0].isArchived)

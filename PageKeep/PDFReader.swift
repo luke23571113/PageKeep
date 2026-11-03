@@ -7,6 +7,7 @@ struct PDFReader: UIViewRepresentable {
     @Binding var currentPageID: UUID?
     let readingMode: ReadingMode
     let onInteraction: () -> Void
+    var session: ReaderSession? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -15,6 +16,8 @@ struct PDFReader: UIViewRepresentable {
     func makeUIView(context: Context) -> PDFReaderView {
         let view = PDFReaderView()
         context.coordinator.view = view
+        view.onViewportWillChange = { [weak coordinator = context.coordinator] in coordinator?.beginResize() }
+        view.onViewportDidChange = { [weak coordinator = context.coordinator] in coordinator?.endResize() }
         view.retryButton.addTarget(context.coordinator, action: #selector(Coordinator.retry), for: .touchUpInside)
         NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.pageChanged), name: .PDFViewPageChanged, object: view.pdfView)
         NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.scaleChanged), name: .PDFViewScaleChanged, object: view.pdfView)
@@ -30,6 +33,8 @@ struct PDFReader: UIViewRepresentable {
     static func dismantleUIView(_ view: PDFReaderView, coordinator: Coordinator) {
         coordinator.stop()
         view.retryButton.removeTarget(coordinator, action: nil, for: .allEvents)
+        view.onViewportWillChange = nil
+        view.onViewportDidChange = nil
         NotificationCenter.default.removeObserver(coordinator)
     }
 
@@ -45,6 +50,8 @@ struct PDFReader: UIViewRepresentable {
         private var appliedReadingMode: ReadingMode?
         private var layoutGeneration = UUID()
         private var interactionGestures: [UIGestureRecognizer] = []
+        private var resizePage: PDFPage?
+        private var resizeZoom: CGFloat = 1
 
         init(parent: PDFReader) {
             self.parent = parent
@@ -77,6 +84,7 @@ struct PDFReader: UIViewRepresentable {
                   let index = parent.pageIDs.firstIndex(of: id),
                   index < document.pageCount,
                   let page = document.page(at: index), view.pdfView.currentPage !== page else { return }
+            layoutGeneration = UUID()
             isUpdating = true
             view.pdfView.go(to: page)
             isUpdating = false
@@ -109,7 +117,26 @@ struct PDFReader: UIViewRepresentable {
 
         @objc func scaleChanged() {
             guard !isUpdating else { return }
+            if let pdfView = view?.pdfView, pdfView.document != nil {
+                let fitScale = pdfView.scaleFactorForSizeToFit
+                if fitScale > 0 { parent.session?.relativeZoom = pdfView.scaleFactor / fitScale }
+            }
             reportInteraction()
+        }
+
+        func beginResize() {
+            guard loading == nil, let pdfView = view?.pdfView, pdfView.document != nil,
+                  let page = pdfView.currentPage else { return }
+            resizePage = page
+            let fitScale = pdfView.scaleFactorForSizeToFit
+            resizeZoom = parent.session?.relativeZoom ?? (fitScale > 0 ? pdfView.scaleFactor / fitScale : 1)
+            isUpdating = true
+        }
+
+        func endResize() {
+            guard let page = resizePage else { return }
+            resizePage = nil
+            restoreZoom(resizeZoom, on: page)
         }
 
         private func reportInteraction() {
@@ -166,6 +193,7 @@ struct PDFReader: UIViewRepresentable {
                     pdfView.scaleFactor = min(max(requestedScale, pdfView.minScaleFactor), pdfView.maxScaleFactor)
                 }
                 self.isUpdating = false
+                self.parent.session?.relativeZoom = relativeZoom
             }
         }
 
@@ -183,7 +211,8 @@ struct PDFReader: UIViewRepresentable {
             let oldIndex = view.pdfView.currentPage.flatMap { view.pdfView.document?.index(for: $0) } ?? 0
             let fitScale = view.pdfView.scaleFactorForSizeToFit
             let hasDocument = view.pdfView.document != nil
-            let relativeZoom = hasDocument && fitScale > 0 ? view.pdfView.scaleFactor / fitScale : 1
+            let relativeZoom = hasDocument && fitScale > 0
+                ? view.pdfView.scaleFactor / fitScale : parent.session?.relativeZoom ?? 1
             view.setLoading()
             loading = Task { @MainActor [weak self] in
                 let loaded = await Task.detached(priority: .userInitiated) {
@@ -252,6 +281,9 @@ final class PDFReaderView: UIView {
     private let progress = UIActivityIndicatorView(style: .medium)
     private let errorLabel = UILabel()
     private let errorStack = UIStackView()
+    var onViewportWillChange: (() -> Void)?
+    var onViewportDidChange: (() -> Void)?
+    private var previousSize: CGSize = .zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -289,6 +321,14 @@ final class PDFReaderView: UIView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        let isResize = previousSize != .zero && previousSize != bounds.size
+        previousSize = bounds.size
+        if isResize { onViewportWillChange?() }
+        super.layoutSubviews()
+        if isResize { onViewportDidChange?() }
     }
 
     override var canBecomeFirstResponder: Bool { true }

@@ -6,10 +6,13 @@ struct NotebookView: View {
     let presentation: NotebookPresentation
     let initialPageID: UUID?
     let selectionRequestID: UUID
+    let session: ReaderSession?
+    let onClose: (() -> Void)?
     @State private var currentPageID: UUID?
     @State private var knownPageIDs: [UUID] = []
     @State private var isPanelOpen = false
     @Environment(AppSettings.self) private var settings
+    @Environment(ReadingPositionStore.self) private var readingPositions
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -19,15 +22,21 @@ struct NotebookView: View {
         notebookID: UUID,
         initialPageID: UUID? = nil,
         selectionRequestID: UUID,
-        presentation: NotebookPresentation
+        presentation: NotebookPresentation,
+        session: ReaderSession? = nil,
+        onClose: (() -> Void)? = nil
     ) {
         self.store = store
         self.notebookID = notebookID
         self.initialPageID = initialPageID
         self.selectionRequestID = selectionRequestID
         self.presentation = presentation
+        self.session = session
+        self.onClose = onClose
         _currentPageID = State(initialValue: initialPageID)
     }
+
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
     var body: some View {
         Group {
@@ -35,47 +44,71 @@ struct NotebookView: View {
                 notebookContent(notebook)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .bottom) {
-                        ReaderActionPanel(
-                            notebook: notebook,
-                            expanded: isPanelOpen || voiceOverEnabled,
-                            isBusy: store.isBusy,
-                            pagesUnavailable: store.notebookErrors[notebookID] != nil,
-                            showsPageNumber: settings.showsPageNumber,
-                            pageNumber: pageNumber(in: notebook),
-                            onAddPages: addPages,
-                            onManage: { presentation.show(.manage(notebookID)) },
-                            onShare: { presentation.share(notebook, store: store) },
-                            onExpand: { setPanelOpen(true) },
-                            onClose: closePanel
-                        )
+                        if isPad {
+                            pageIndicator(notebook)
+                        } else {
+                            ReaderActionPanel(
+                                notebook: notebook,
+                                expanded: isPanelOpen || voiceOverEnabled,
+                                isBusy: store.isBusy,
+                                pagesUnavailable: store.notebookErrors[notebookID] != nil,
+                                showsPageNumber: settings.showsPageNumber,
+                                pageNumber: pageNumber(in: notebook),
+                                onAddPages: addPages,
+                                onManage: { presentation.show(.manage(notebookID)) },
+                                onShare: { presentation.share(notebook, store: store) },
+                                onExpand: { setPanelOpen(true) },
+                                onClose: closePanel
+                            )
+                        }
                     }
                     .onChange(of: notebook.pages.map(\.id), initial: true) { _, ids in
                         followCurrentPage(in: ids)
                     }
+                    .onChange(of: currentPageID) { _, _ in rememberPage(in: notebook.pages.map(\.id)) }
             } else {
                 ContentUnavailableView("Notebook Unavailable", systemImage: "book.closed")
             }
         }
         .navigationTitle(store.notebook(id: notebookID)?.name ?? "Notebook")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden()
+        .navigationBarBackButtonHidden(!isPad)
         .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarBackground(isPad ? .automatic : .hidden, for: .navigationBar)
         .toolbar {
             if let notebook = store.notebook(id: notebookID) {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Label("Back", systemImage: "chevron.left")
-                            .labelStyle(.iconOnly)
-                            .font(.system(size: 14, weight: .medium))
-                            .frame(width: 28, height: 28)
-                    }
+                if !isPad {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { closeReader() } label: {
+                            Label("Back", systemImage: "chevron.left")
+                                .labelStyle(.iconOnly)
+                                .font(.system(size: 14, weight: .medium))
+                                .frame(width: 28, height: 28)
+                        }
                         .accessibilityIdentifier("viewer.back")
                         .tint(.primary)
+                    }
                 }
-                ToolbarItem(placement: .principal) {
-                    ReaderTitle(name: notebook.name)
-                        .onTapGesture { closePanel() }
+                if !isPad {
+                    ToolbarItem(placement: .principal) {
+                        ReaderTitle(name: notebook.name)
+                            .onTapGesture { closePanel() }
+                    }
+                }
+                if isPad {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Menu("Add Pages", systemImage: "doc.badge.plus") {
+                            AcquisitionMenuChoices(onChoose: addPages)
+                        }
+                        .accessibilityIdentifier("viewer.add")
+                        .disabled(store.isBusy || store.notebookErrors[notebookID] != nil)
+                        Button("Manage Pages", systemImage: "square.grid.2x2") { presentation.show(.manage(notebookID)) }
+                            .accessibilityIdentifier("viewer.manage")
+                            .disabled(store.isBusy || store.notebookErrors[notebookID] != nil)
+                        Button("Share", systemImage: "square.and.arrow.up") { presentation.share(notebook, store: store) }
+                            .accessibilityIdentifier("viewer.share")
+                            .disabled(store.isBusy || notebook.pages.isEmpty || store.notebookErrors[notebookID] != nil)
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ReaderNotebookMenu(
@@ -92,10 +125,14 @@ struct NotebookView: View {
             }
         }
         .onChange(of: selectionRequestID) { _, _ in
-            if let initialPageID { currentPageID = initialPageID }
+            session?.selectionRequestID = selectionRequestID
+            if let initialPageID, let notebook = store.notebook(id: notebookID),
+               notebook.pages.contains(where: { $0.id == initialPageID }) {
+                currentPageID = initialPageID
+            }
         }
         .onChange(of: store.notebook(id: notebookID)?.isArchived, initial: true) { _, archived in
-            if archived == true || store.notebook(id: notebookID) == nil { dismiss() }
+            if archived == true || store.notebook(id: notebookID) == nil { closeReader() }
         }
     }
 
@@ -123,12 +160,35 @@ struct NotebookView: View {
                 pageIDs: notebook.pages.map(\.id),
                 currentPageID: $currentPageID,
                 readingMode: settings.readingMode,
-                onInteraction: { closePanel() }
+                onInteraction: { closePanel() },
+                session: session
             )
             .ignoresSafeArea(.container, edges: .bottom)
         } else {
             ContentUnavailableView("Pages Unavailable", systemImage: "exclamationmark.triangle", description: Text("The saved PDF could not be found."))
         }
+    }
+
+    private func closeReader() {
+        if let onClose { onClose() } else { dismiss() }
+    }
+
+    private func pageIndicator(_ notebook: Notebook) -> some View {
+        HStack {
+            Spacer()
+            if store.isBusy { ProgressView().accessibilityLabel("Saving changes") }
+            if settings.showsPageNumber, !notebook.pages.isEmpty {
+                Text("\(pageNumber(in: notebook))")
+                    .font(.caption.monospacedDigit())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .accessibilityLabel("Page \(pageNumber(in: notebook)) of \(notebook.pageCount)")
+                    .accessibilityIdentifier("viewer.pageNumber")
+            }
+        }
+        .padding(16)
+        .allowsHitTesting(false)
     }
 
     private func closePanel() {
@@ -150,13 +210,27 @@ struct NotebookView: View {
     }
 
     private func followCurrentPage(in ids: [UUID]) {
+        if knownPageIDs.isEmpty, isPad {
+            let requestedPage = session?.selectionRequestID == selectionRequestID ? session?.pageID : initialPageID
+            currentPageID = readingPositions.pageID(for: notebookID, in: ids, requestedPageID: requestedPage)
+            session?.selectionRequestID = selectionRequestID
+        }
         if let currentPageID, ids.contains(currentPageID) {
             knownPageIDs = ids
+            rememberPage(in: ids)
             return
         }
         let previousIndex = knownPageIDs.firstIndex { $0 == currentPageID } ?? 0
         currentPageID = ids.isEmpty ? nil : ids[min(previousIndex, ids.count - 1)]
         knownPageIDs = ids
+        rememberPage(in: ids)
+    }
+
+    private func rememberPage(in ids: [UUID]) {
+        if isPad {
+            session?.pageID = currentPageID
+            readingPositions.remember(pageID: currentPageID, in: ids, for: notebookID)
+        }
     }
 }
 

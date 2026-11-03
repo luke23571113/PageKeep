@@ -10,42 +10,49 @@ struct ContentView: View {
     @State private var isSavingOrder = false
     @State private var showsSearch = false
     @State private var searchPull = SearchPullState()
+    @State private var compactColumn: NavigationSplitViewColumn = .sidebar
+    @State private var showsFolderName = false
+    @State private var folderName = ""
+    @State private var folderToRename: UUID?
+    @State private var folderToDelete: NotebookFolder?
+    @Environment(FolderExpansionStore.self) private var folderExpansion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isBusy: Bool { store.isBusy || isSavingOrder }
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
     var body: some View {
-        @Bindable var navigation = navigation
-        NavigationStack(path: $navigation.path) {
-            Group {
-                if store.isLoading {
-                    ProgressView("Loading notebooks…")
-                } else if let error = store.loadError {
-                    storageError(error)
-                } else if store.activeNotebooks.isEmpty {
-                    emptyLibrary
-                } else {
-                    notebookList
+        Group {
+            if isPad {
+                NavigationSplitView(preferredCompactColumn: $compactColumn) {
+                    libraryContent
+                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 380)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Settings", systemImage: "gearshape") { presentation.show(.settings) }
+                                    .accessibilityIdentifier("library.settings")
+                            }
+                            ToolbarItem(placement: .topBarTrailing) { createNotebookMenu.disabled(isBusy || store.loadError != nil) }
+                        }
+                        .searchable(text: $searchText, prompt: "Search Notebooks")
+                } detail: {
+                    NavigationStack {
+                        if let id = navigation.path.last {
+                            reader(id)
+                                .id(id)
+                        } else {
+                            ContentUnavailableView("Select a Notebook", systemImage: "book.closed")
+                        }
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("Notebooks")
-            .overlay(alignment: .bottomLeading) {
-                settingsButton.padding(16)
-            }
-            .navigationDestination(for: UUID.self) { id in
-                NotebookView(
-                    store: store,
-                    notebookID: id,
-                    initialPageID: navigation.requestedPageID,
-                    selectionRequestID: navigation.selectionRequestID,
-                    presentation: presentation
-                )
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                phoneNavigation
             }
         }
         .overlay(alignment: .topTrailing) {
-            if navigation.path.isEmpty {
+            if !isPad && navigation.path.isEmpty {
                 createNotebookMenu
                     .modifier(LibraryCircleButton())
                     .disabled(isBusy || store.loadError != nil)
@@ -54,7 +61,7 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .top) {
-            if navigation.path.isEmpty && searchPull.isPulling && searchPull.distance > 8 {
+            if !isPad && navigation.path.isEmpty && searchPull.isPulling && searchPull.distance > 8 {
                 SearchPullIndicator(progress: min(searchPull.distance / 72, 1))
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
@@ -63,20 +70,78 @@ struct ContentView: View {
             }
         }
         .notebookPresentations(store: store, presentation: presentation) { id, pageID in
-            navigation.open(id, pageID: pageID)
+            openNotebook(id, pageID: pageID)
+        }
+        .alert(folderToRename == nil ? "Create Folder" : "Rename Folder", isPresented: $showsFolderName) {
+            TextField("Folder name", text: $folderName)
+                .accessibilityIdentifier("folder.name")
+            Button("Cancel", role: .cancel) { }
+            Button(folderToRename == nil ? "Create" : "Save", action: saveFolderName)
+                .disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isBusy)
+        }
+        .confirmationDialog("Delete “\(folderToDelete?.name ?? "Folder")”?", isPresented: Binding(
+            get: { folderToDelete != nil },
+            set: { if !$0 { folderToDelete = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete Folder", role: .destructive, action: deleteFolder)
+            Button("Cancel", role: .cancel) { folderToDelete = nil }
+        } message: {
+            Text("Your notebooks will be kept and moved to No Folder.")
         }
         .task { await store.load() }
         .onChange(of: navigation.path) { _, _ in
             presentation.cancelPreparation()
             searchPull.reset(includingBaseline: true)
         }
-        .onChange(of: store.activeNotebooks.first?.id) { _, _ in
+        .onChange(of: store.rootItems.first?.id) { _, _ in
             searchPull.reset(includingBaseline: true)
         }
         .onDisappear {
             searchPull.reset()
             presentation.cancelPreparation()
         }
+    }
+
+    private var phoneNavigation: some View {
+        @Bindable var navigation = navigation
+        return NavigationStack(path: $navigation.path) {
+            libraryContent
+                .overlay(alignment: .bottomLeading) { settingsButton.padding(16) }
+                .navigationDestination(for: UUID.self) { id in reader(id) }
+        }
+    }
+
+    private var libraryContent: some View {
+        Group {
+            if store.isLoading {
+                ProgressView("Loading notebooks…")
+            } else if let error = store.loadError {
+                storageError(error)
+            } else if store.rootItems.isEmpty {
+                emptyLibrary
+            } else {
+                notebookList
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("Notebooks")
+    }
+
+    private func reader(_ id: UUID) -> some View {
+        NotebookView(
+            store: store,
+            notebookID: id,
+            initialPageID: navigation.requestedPageID,
+            selectionRequestID: navigation.selectionRequestID,
+            presentation: presentation,
+            session: navigation.readerSession,
+            onClose: isPad ? { navigation.path = []; compactColumn = .sidebar } : nil
+        )
+    }
+
+    private func openNotebook(_ id: UUID, pageID: UUID? = nil) {
+        navigation.open(id, pageID: pageID)
+        if isPad { compactColumn = .detail }
     }
 
     private var settingsButton: some View {
@@ -110,7 +175,7 @@ struct ContentView: View {
     private var notebookList: some View {
         ScrollViewReader { scroll in
             List {
-                if showsSearch || voiceOverEnabled {
+                if !isPad && (showsSearch || voiceOverEnabled) {
                     searchField
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                         .listRowBackground(Color.clear)
@@ -122,10 +187,10 @@ struct ContentView: View {
                     if hasQuery {
                         ForEach(displayedNotebooks) { notebook in notebookRow(notebook) }
                     } else {
-                        ForEach(store.activeNotebooks) { notebook in
-                            notebookRow(notebook)
+                        ForEach(store.rootItems) { item in
+                            rootItemRow(item)
                                 .background {
-                                    if notebook.id == store.activeNotebooks.first?.id {
+                                    if item.id == store.rootItems.first?.id {
                                         GeometryReader { geometry in
                                             Color.clear.preference(
                                                 key: FirstNotebookPosition.self,
@@ -135,7 +200,7 @@ struct ContentView: View {
                                     }
                                 }
                         }
-                            .onMove(perform: reorderNotebooks)
+                            .onMove { reorderItems(from: $0, to: $1, in: nil) }
                             .moveDisabled(isBusy)
                     }
                 }
@@ -155,7 +220,7 @@ struct ContentView: View {
                             startX: gesture.startLocation.x,
                             horizontal: gesture.translation.width,
                             vertical: gesture.translation.height,
-                            isEnabled: !showsSearch && !voiceOverEnabled && navigation.path.isEmpty
+                            isEnabled: !isPad && !showsSearch && !voiceOverEnabled && navigation.path.isEmpty
                         )
                     }
                     .onEnded { _ in
@@ -170,7 +235,7 @@ struct ContentView: View {
             .onPreferenceChange(FirstNotebookPosition.self) { position in
                 searchPull.updatePosition(
                     position,
-                    isEnabled: !showsSearch && !voiceOverEnabled && navigation.path.isEmpty
+                    isEnabled: !isPad && !showsSearch && !voiceOverEnabled && navigation.path.isEmpty
                 )
             }
             .onChange(of: showsSearch) { _, visible in
@@ -195,9 +260,9 @@ struct ContentView: View {
 
     private func notebookRow(_ notebook: Notebook) -> some View {
         Button {
-            navigation.open(notebook.id)
+            openNotebook(notebook.id)
         } label: {
-            NotebookRow(notebook: notebook, error: store.notebookErrors[notebook.id])
+            NotebookRow(notebook: notebook, error: store.notebookErrors[notebook.id], folderName: hasQuery ? store.folderName(for: notebook) : nil)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
@@ -225,39 +290,102 @@ struct ContentView: View {
             .tint(.orange)
         }
         .accessibilityActions {
-            if !hasQuery, let index = store.activeNotebooks.firstIndex(where: { $0.id == notebook.id }) {
+            let folderID = store.effectiveFolderID(for: notebook)
+            let ids = itemIDs(in: folderID)
+            if !hasQuery, let index = ids.firstIndex(of: notebook.id) {
                 if index > 0 {
-                    Button("Move Earlier") { moveNotebook(notebook.id, by: -1) }
+                    Button("Move Earlier") { moveItem(notebook.id, by: -1, in: folderID) }
                 }
-                if index < store.activeNotebooks.count - 1 {
-                    Button("Move Later") { moveNotebook(notebook.id, by: 1) }
+                if index < ids.count - 1 {
+                    Button("Move Later") { moveItem(notebook.id, by: 1, in: folderID) }
                 }
             }
         }
         .disabled(isBusy)
     }
 
-    private func reorderNotebooks(from source: IndexSet, to destination: Int) {
-        guard !hasQuery, !isBusy else { return }
-        var ids = store.activeNotebooks.map(\.id)
-        ids.move(fromOffsets: source, toOffset: destination)
-        saveOrder(ids)
+    @ViewBuilder
+    private func rootItemRow(_ item: LibraryItem) -> some View {
+        switch item {
+        case let .notebook(notebook):
+            notebookRow(notebook)
+        case let .folder(folder):
+            folderRow(folder)
+        }
     }
 
-    private func moveNotebook(_ id: UUID, by offset: Int) {
+    private func folderRow(_ folder: NotebookFolder) -> some View {
+        DisclosureGroup(isExpanded: Binding(
+            get: { folderExpansion.isExpanded(folder.id) },
+            set: { folderExpansion.setExpanded($0, for: folder.id) }
+        )) {
+            if store.notebooks(in: folder.id).isEmpty {
+                Text("No Notebooks")
+                    .foregroundStyle(.secondary)
+                    .moveDisabled(true)
+            } else {
+                ForEach(store.notebooks(in: folder.id)) { notebook in
+                    notebookRow(notebook)
+                }
+                .onMove { reorderItems(from: $0, to: $1, in: folder.id) }
+                .moveDisabled(isBusy)
+            }
+        } label: {
+            Label(folder.name, systemImage: "folder")
+                .font(.headline)
+                .padding(.vertical, 10)
+                .contextMenu {
+                    Button("Rename Folder", systemImage: "pencil") {
+                        folderToRename = folder.id
+                        folderName = folder.name
+                        showsFolderName = true
+                    }
+                    .disabled(isBusy)
+                    Button("Delete Folder", systemImage: "trash", role: .destructive) {
+                        folderToDelete = folder
+                    }
+                    .disabled(isBusy)
+                }
+                .accessibilityIdentifier("library.folder.\(folder.id.uuidString)")
+                .accessibilityActions {
+                    if let index = store.rootItems.firstIndex(where: { $0.id == folder.id }) {
+                        if index > 0 {
+                            Button("Move Earlier") { moveItem(folder.id, by: -1, in: nil) }
+                        }
+                        if index < store.rootItems.count - 1 {
+                            Button("Move Later") { moveItem(folder.id, by: 1, in: nil) }
+                        }
+                    }
+                }
+        }
+    }
+
+    private func itemIDs(in folderID: UUID?) -> [UUID] {
+        if let folderID { return store.notebooks(in: folderID).map(\.id) }
+        return store.rootItems.map(\.id)
+    }
+
+    private func reorderItems(from source: IndexSet, to destination: Int, in folderID: UUID?) {
         guard !hasQuery, !isBusy else { return }
-        var ids = store.activeNotebooks.map(\.id)
+        var ids = itemIDs(in: folderID)
+        ids.move(fromOffsets: source, toOffset: destination)
+        saveOrder(ids, in: folderID)
+    }
+
+    private func moveItem(_ id: UUID, by offset: Int, in folderID: UUID?) {
+        guard !hasQuery, !isBusy else { return }
+        var ids = itemIDs(in: folderID)
         guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return }
         ids.swapAt(index, index + offset)
-        saveOrder(ids)
+        saveOrder(ids, in: folderID)
     }
 
-    private func saveOrder(_ ids: [UUID]) {
+    private func saveOrder(_ ids: [UUID], in folderID: UUID?) {
         guard !isBusy else { return }
         isSavingOrder = true
         Task {
             defer { isSavingOrder = false }
-            do { try await store.reorderNotebooks(orderedActiveIDs: ids) }
+            do { try await store.reorderItems(inFolderID: folderID, orderedIDs: ids) }
             catch { presentation.errorMessage = error.localizedDescription }
         }
     }
@@ -269,13 +397,46 @@ struct ContentView: View {
                     presentation.show(.acquisition(nil, source))
                 }
             }
+            Button("Create Folder", systemImage: "folder.badge.plus") {
+                folderToRename = nil
+                folderName = ""
+                showsFolderName = true
+            }
+            .accessibilityIdentifier("library.createFolder")
         } label: {
             Label("Create New Notebook", systemImage: "plus")
                 .labelStyle(.iconOnly)
                 .frame(width: 32, height: 32)
         }
-        .accessibilityLabel("Create new notebook")
+        .accessibilityLabel("Create notebook or folder")
         .accessibilityIdentifier("library.create")
+    }
+
+    private func saveFolderName() {
+        guard !isBusy else { return }
+        let name = folderName
+        let folderID = folderToRename
+        Task {
+            do {
+                if let folderID {
+                    try await store.renameFolder(folderID, name: name)
+                } else {
+                    let id = try await store.createFolder(name: name)
+                    folderExpansion.setExpanded(true, for: id)
+                }
+            } catch {
+                presentation.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteFolder() {
+        guard !isBusy, let folder = folderToDelete else { return }
+        folderToDelete = nil
+        Task {
+            do { try await store.deleteFolder(folder.id) }
+            catch { presentation.errorMessage = error.localizedDescription }
+        }
     }
 
     private var emptyLibrary: some View {
@@ -320,6 +481,7 @@ struct ContentView: View {
 private struct NotebookRow: View {
     let notebook: Notebook
     let error: String?
+    let folderName: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -331,6 +493,11 @@ private struct NotebookRow: View {
                 Text(notebook.pageCountLabel)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                if let folderName {
+                    Label(folderName, systemImage: "folder")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text("Modified \(notebook.modifiedAt.formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -398,11 +565,13 @@ final class LibraryNavigation {
     var path: [UUID] = []
     private(set) var requestedPageID: UUID?
     private(set) var selectionRequestID = UUID()
+    private(set) var readerSession = ReaderSession()
 
     func open(_ notebookID: UUID, pageID: UUID? = nil) {
         requestedPageID = pageID
         selectionRequestID = UUID()
         if path != [notebookID] {
+            readerSession = ReaderSession()
             path = [notebookID]
         }
     }

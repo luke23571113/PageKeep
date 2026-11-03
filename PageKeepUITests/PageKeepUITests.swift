@@ -1,9 +1,11 @@
 import XCTest
+import UIKit
 
 final class PageKeepUITests: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "The iPhone suite checks the phone action handle. iPad has its own suite.")
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--reset-ui-tests"]
@@ -42,6 +44,66 @@ final class PageKeepUITests: XCTestCase {
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Resume Notes")).firstMatch
         XCTAssertTrue(renamed.waitForExistence(timeout: 10))
         XCTAssertEqual(app.cells.count, 1)
+    }
+
+    func testEmptyFolderCanCollapseAndKeepsExpansionAfterRelaunch() {
+        waitForLibrary()
+        createFolder(named: "Class Notes")
+        let folder = folderRow()
+        XCTAssertTrue(folder.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No Notebooks"].exists)
+        folder.tap()
+        XCTAssertTrue(app.staticTexts["No Notebooks"].waitForNonExistence(timeout: 5))
+
+        relaunchSavedLibrary()
+        XCTAssertTrue(folder.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["No Notebooks"].exists)
+        folder.tap()
+        XCTAssertTrue(app.staticTexts["No Notebooks"].waitForExistence(timeout: 5))
+    }
+
+    func testEditorAssignsNotebookToFolderAndKeepsItAfterRelaunch() {
+        waitForLibrary()
+        createFolder(named: "Class Notes")
+        let notebook = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.notebook.")).firstMatch
+        XCTAssertTrue(notebook.waitForExistence(timeout: 5))
+        notebook.tap()
+        showReaderActions()
+        app.buttons["viewer.actions"].tap()
+        app.buttons["Edit Notebook"].tap()
+        let picker = app.buttons["editor.folder"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        if !picker.isHittable { app.swipeUp() }
+        picker.tap()
+        app.buttons["Class Notes"].tap()
+        app.buttons["editor.save"].tap()
+        XCTAssertTrue(app.buttons["viewer.back"].waitForExistence(timeout: 5))
+        app.buttons["viewer.back"].tap()
+        XCTAssertTrue(notebook.waitForExistence(timeout: 5))
+        folderRow().tap()
+        XCTAssertTrue(notebook.waitForNonExistence(timeout: 5))
+
+        relaunchSavedLibrary()
+        XCTAssertTrue(folderRow().waitForExistence(timeout: 10))
+        XCTAssertFalse(notebook.exists)
+        folderRow().tap()
+        XCTAssertTrue(notebook.waitForExistence(timeout: 5))
+        notebook.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Edit Notebook"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Move to Folder"].exists)
+        XCTAssertFalse(app.buttons["Rename Folder"].exists)
+    }
+
+    func testLibraryWithOnlyAnEmptyFolderStillShowsFolder() {
+        openSample()
+        app.buttons["viewer.actions"].tap()
+        app.buttons["Archive"].tap()
+        XCTAssertTrue(app.staticTexts["No Notebooks Yet"].waitForExistence(timeout: 5))
+        createFolder(named: "Empty Folder")
+        XCTAssertTrue(folderRow().waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No Notebooks"].exists)
+        XCTAssertFalse(app.staticTexts["No Notebooks Yet"].exists)
     }
 
     func testDeletingSampleStaysEmptyAfterRelaunch() throws {
@@ -231,7 +293,7 @@ final class PageKeepUITests: XCTestCase {
         app.buttons["Dark"].tap()
         app.buttons["settings.scrolling"].tap()
         app.buttons["Horizontal"].tap()
-        XCTAssertTrue(app.staticTexts["Coming in V3"].exists)
+        XCTAssertTrue(app.staticTexts["iCloud sync needs app setup"].exists)
         XCTAssertFalse(app.switches["settings.cloudSync"].isEnabled)
         relaunchSavedLibrary()
         waitForLibrary()
@@ -418,6 +480,22 @@ final class PageKeepUITests: XCTestCase {
         XCTAssertTrue(app.buttons["arranger.done"].waitForExistence(timeout: 5))
     }
 
+    private func createFolder(named name: String) {
+        app.buttons["library.create"].tap()
+        app.buttons["Create Folder"].tap()
+        let alert = app.alerts["Create Folder"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.textFields.firstMatch.tap()
+        alert.textFields.firstMatch.typeText(name)
+        alert.buttons["Create"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+    }
+
+    private func folderRow() -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.folder.")).firstMatch
+    }
+
     private func arrangedPageIDs() -> [String] {
         let rows = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "arranger.page."))
@@ -502,6 +580,86 @@ final class PageKeepUITests: XCTestCase {
 
     private func pageElement(id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+final class PageKeepIPadUITests: XCTestCase {
+    private var app: XCUIApplication!
+
+    override func setUpWithError() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "Requires an iPad Simulator.")
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--reset-ui-tests"]
+        app.launch()
+        XCTAssertTrue(app.buttons["library.create"].waitForExistence(timeout: 15))
+    }
+
+    override func tearDownWithError() throws {
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    func testWideReaderKeepsLibraryBesideStandardActions() {
+        openSample()
+        XCTAssertTrue(app.buttons["viewer.add"].exists)
+        XCTAssertTrue(app.buttons["viewer.manage"].exists)
+        XCTAssertTrue(app.buttons["viewer.share"].exists)
+        XCTAssertFalse(app.buttons["viewer.panel"].exists)
+        XCTAssertTrue(app.buttons["library.create"].isHittable)
+        XCTAssertTrue(notebookRow.isHittable)
+        attachScreenshot(named: "iPad sidebar and reader")
+    }
+
+    func testReadingPageRestoresAfterLibraryRelaunch() {
+        openSample()
+        selectLastPage()
+        app.terminate()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.buttons["library.create"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["viewer.manage"].exists)
+        openSample()
+        XCTAssertTrue(app.staticTexts["Page 3 of 3"].waitForExistence(timeout: 5))
+    }
+
+    func testPageSurvivesWindowGeometryChange() {
+        openSample()
+        selectLastPage()
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.staticTexts["Page 3 of 3"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(app.staticTexts["Page 3 of 3"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["viewer.manage"].isHittable)
+        attachScreenshot(named: "iPad reader after resizing")
+    }
+
+    private var notebookRow: XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.notebook.")).firstMatch
+    }
+
+    private func openSample() {
+        XCTAssertTrue(notebookRow.waitForExistence(timeout: 15))
+        notebookRow.tap()
+        XCTAssertTrue(app.buttons["viewer.manage"].waitForExistence(timeout: 10))
+    }
+
+    private func selectLastPage() {
+        app.buttons["viewer.manage"].tap()
+        XCTAssertTrue(app.buttons["manager.select"].waitForExistence(timeout: 10))
+        let page = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "manager.page.")).allElementsBoundByIndex.last
+        XCTAssertNotNil(page)
+        page?.tap()
+        XCTAssertTrue(app.staticTexts["Page 3 of 3"].waitForExistence(timeout: 10))
     }
 
     private func attachScreenshot(named name: String) {

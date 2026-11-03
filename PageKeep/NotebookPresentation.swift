@@ -131,6 +131,8 @@ struct NotebookMenuActions: View {
         Button("Edit Notebook", systemImage: "pencil") {
             presentation.show(.edit(notebook.id))
         }
+        MoveToFolderMenu(store: store, notebook: notebook) { presentation.errorMessage = $0 }
+            .disabled(store.isBusy || presentation.isPerformingAction)
         Menu("Add Pages", systemImage: "doc.badge.plus") {
             AcquisitionMenuChoices { source in
                 presentation.show(.acquisition(notebook.id, source))

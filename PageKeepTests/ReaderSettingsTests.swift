@@ -55,6 +55,50 @@ final class ReaderSettingsTests: XCTestCase {
         XCTAssertEqual(settings.readingMode, .vertical)
     }
 
+    #if !os(macOS)
+    func testResizeKeepsPageAndRelativeZoom() async throws {
+        let url = URL(fileURLWithPath: "/resize.pdf")
+        let ids = [UUID(), UUID()]
+        let document = PDFDocument()
+        for index in 0..<2 {
+            let page = PDFPage()
+            page.setBounds(CGRect(x: 0, y: 0, width: 612, height: 792), for: .mediaBox)
+            document.insert(page, at: index)
+        }
+        let page = try XCTUnwrap(document.page(at: 1))
+        let session = ReaderSession()
+        let reader = PDFReader(
+            url: url, pageIDs: ids, currentPageID: .constant(ids[1]),
+            readingMode: .vertical, onInteraction: {}, session: session
+        )
+        let view = PDFReaderView(frame: CGRect(x: 0, y: 0, width: 980, height: 760))
+        view.pdfView.document = document
+        view.layoutIfNeeded()
+        view.pdfView.go(to: page)
+        let coordinator = reader.makeCoordinator()
+        coordinator.view = view
+        coordinator.loadedURL = url
+        coordinator.update(reader)
+        try await Task.sleep(for: .milliseconds(20))
+        view.pdfView.minScaleFactor = 0.1
+        view.pdfView.maxScaleFactor = 5
+        view.pdfView.autoScales = false
+        view.pdfView.scaleFactor = view.pdfView.scaleFactorForSizeToFit * 1.5
+        coordinator.scaleChanged()
+        XCTAssertEqual(session.relativeZoom, 1.5, accuracy: 0.05)
+
+        coordinator.beginResize()
+        view.frame.size.width = 620
+        view.layoutIfNeeded()
+        coordinator.endResize()
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertTrue(view.pdfView.document === document)
+        XCTAssertTrue(view.pdfView.currentPage === page)
+        XCTAssertEqual(view.pdfView.scaleFactor / view.pdfView.scaleFactorForSizeToFit, 1.5, accuracy: 0.05)
+        coordinator.stop()
+    }
+
     func testReaderTeardownRemovesItsInteractionGestures() {
         let reader = PDFReader(
             url: URL(fileURLWithPath: "/test.pdf"), pageIDs: [], currentPageID: .constant(nil),
@@ -156,4 +200,5 @@ final class ReaderSettingsTests: XCTestCase {
         XCTAssertEqual(view.pdfView.displayMode, .singlePageContinuous)
         XCTAssertEqual(view.pdfView.backgroundColor, UIColor.secondarySystemBackground)
     }
+    #endif
 }

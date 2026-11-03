@@ -49,11 +49,68 @@
 		4E748E2EF664FAB19B1372B5 /* LibraryFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBC918DF4F64B4507E761F7E /* LibraryFiles.swift */; };
 		1A72F1BF7B3A7C912352167E /* AcquisitionModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FBBB42529C6FCCF31CD322C /* AcquisitionModelTests.swift */; };
 		9A7DAF04FCF80F2EE22A128A /* NotebookPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27983FA4AC96C9296A7F403D /* NotebookPresentationTests.swift */; };
+		03B50881F1489E9F2D6C7F1F /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52365AF304208CCD2B138036 /* AppSettings.swift */; };
+		09A1B793645876F13DD17807 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4C69F8C408057C2621742F6 /* Cocoa.framework */; };
+		09C49A14E4F610428D3266AA /* SyncSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 280D3465FCD85D98FE69F574 /* SyncSettingsSection.swift */; };
+		0A939D0DD9A83CC4DB3D94A2 /* ReadingPositionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C0D5580AC062A9B1D6E29B /* ReadingPositionStore.swift */; };
+		0F3195EB34227929BAB80A4F /* LibraryFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBC918DF4F64B4507E761F7E /* LibraryFiles.swift */; };
+		150AD76E995EEB03A1BCCFAD /* CloudSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31B547526BB2FF8E028E4D7 /* CloudSyncCoordinator.swift */; };
+		16DFC687A9AC1725F16FF867 /* ReadingPositionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93A80E09AD1851743C42956B /* ReadingPositionStoreTests.swift */; };
+		2E4BD3C4B740F584855C5A0A /* NotebookNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9450CF68E91C9F9DF8D14384 /* NotebookNamingTests.swift */; };
+		2FA653994A5422C7F4A11162 /* DraftPagePreviewSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12AC0080F914438D76BB7AF3 /* DraftPagePreviewSourceTests.swift */; };
+		3156A52FE0DE672839251E08 /* Notebook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* Notebook.swift */; };
+		31A7EAE0E655FD5F0F8985BF /* MacDraftProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DC047F7CF228F6EACB5C2AD /* MacDraftProtection.swift */; };
+		35D7C202709EA4E246A2D29B /* NotebookSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 834EFE2315A70E9B18A69FA3 /* NotebookSearchTests.swift */; };
+		39494886B3A7DB4B92E59DB6 /* MacFileActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F62E6F05C2D0C1B67CA17B6 /* MacFileActions.swift */; };
+		3C9030CFA5824337514296A3 /* LibraryScaleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B893F64CF995B999D62EC1C6 /* LibraryScaleTests.swift */; };
+		48673371B1047CC2DCB88736 /* LibrarySync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A4D3FAC5E803BAC939EBEA0 /* LibrarySync.swift */; };
+		4CF43C0D0798B26843DEF6FD /* LibrarySync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A4D3FAC5E803BAC939EBEA0 /* LibrarySync.swift */; };
+		4F7FC610FEE7049B85CFF410 /* LibraryScaleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B893F64CF995B999D62EC1C6 /* LibraryScaleTests.swift */; };
+		5F305BEE38BC963049E66985 /* CloudSyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF400239F8A827B4B6625D65 /* CloudSyncCoordinatorTests.swift */; };
+		6620ECB36C8A9CAE6D8DD036 /* PDFService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1067B42F2CF571DBF2A53825 /* PDFService.swift */; };
+		68DAACDEB0917A7421A9AF16 /* NotebookNaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 196AC10E9157BA7D17EFAAAB /* NotebookNaming.swift */; };
+		69F85236D885EEBD16EDB346 /* CloudSyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF400239F8A827B4B6625D65 /* CloudSyncCoordinatorTests.swift */; };
+		6A752C98A6B7231B8BAFF0F2 /* CloudKitTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA803B4D7236570584F689D8 /* CloudKitTransport.swift */; };
+		6E6449EF5420D4B3B0BD5C97 /* NotebookAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71458FCCE529398B84CB68B8 /* NotebookAppearance.swift */; };
+		7B94E7FDC34D0F013A36B22C /* NotebookDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2459E4A090EF7F162120D392 /* NotebookDraft.swift */; };
+		7ED627770EF7489F4428B410 /* ReadingPositionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93A80E09AD1851743C42956B /* ReadingPositionStoreTests.swift */; };
+		853092C89329EA3C50457AE9 /* PageKeepApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* PageKeepApp.swift */; };
+		943D828F3465056F45C304C3 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23198A15BFDAF15735C0AE71 /* LibraryStore.swift */; };
+		9D3C8AB488CB843D4CE8B5DC /* MacContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622BD846ADC09214BEA1C347 /* MacContentView.swift */; };
+		9FEEC6DBDCCB343E1F3D43A4 /* NotebookDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F268938AD51099766D97020A /* NotebookDraftTests.swift */; };
+		A16E61D4711ABA588BA1C101 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E4C69F8C408057C2621742F6 /* Cocoa.framework */; };
+		A2758D93FDDD15BD139D7D1D /* LibraryRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6976E531772C18DCD9BD714F /* LibraryRepositoryTests.swift */; };
+		A2D078FCCA32B3A18B4467EE /* NotebookSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED8D61290155B7682F5D1665 /* NotebookSearch.swift */; };
+		AA8613282F9B9E13EB02CD68 /* MacPlatformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCDF8965A33B0317C4686328 /* MacPlatformTests.swift */; };
+		BD73087DF2C6E419491E34CD /* LibrarySyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7694E53768EC635B6BAF8C9 /* LibrarySyncTests.swift */; };
+		C082E9183CD23BFFC7BB19A3 /* ReaderSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553570C4FB30708708EA8F07 /* ReaderSettingsTests.swift */; };
+		E29A7E55BFAD7D489D20C08A /* LibrarySyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7694E53768EC635B6BAF8C9 /* LibrarySyncTests.swift */; };
+		E7966AA502B5EF8E8DD818A1 /* MacPDFReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CCD1226A1764FC1BF977326 /* MacPDFReader.swift */; };
+		E8E1533C40CCADF0938F858C /* LibraryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D188E4F823F385E58FF41CE /* LibraryRepository.swift */; };
+		F5895FA1B668810FD10B1233 /* CloudKitTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA803B4D7236570584F689D8 /* CloudKitTransport.swift */; };
+		F86FF575A2A548A473AF4A51 /* CloudSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31B547526BB2FF8E028E4D7 /* CloudSyncCoordinator.swift */; };
+		F93BE46E297DC9B48FEF7A2C /* DraftPagePreviewSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6CB3F37F4AFA0D91BCBA4F9 /* DraftPagePreviewSource.swift */; };
+		FACEDA09AC68C2AAD20F6E45 /* MacNotebookEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E116816ACA216463F6B30E /* MacNotebookEditor.swift */; };
+		FCF305F739318292E71FB1EC /* SyncSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 280D3465FCD85D98FE69F574 /* SyncSettingsSection.swift */; };
+		FF1B553059601E1803430A6A /* ReadingPositionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C0D5580AC062A9B1D6E29B /* ReadingPositionStore.swift */; };
+		4453D46D974FF6BC8083E56D /* FolderControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC9E31E4DBC98BD6583D72B /* FolderControls.swift */; };
+		9FE8387AFF0D9776A2D748BA /* FolderControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC9E31E4DBC98BD6583D72B /* FolderControls.swift */; };
+		63DF80CA64A6E445BE2F3373 /* LibraryFolderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED2CFADF7C8DDF9957C35EF /* LibraryFolderTests.swift */; };
+		BAAA79015AA3E875DEA28AD2 /* LibraryFolderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED2CFADF7C8DDF9957C35EF /* LibraryFolderTests.swift */; };
+		5DEF343C96EFA29DE355926D /* LibraryFolderSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D87EEECB9F5F0880DE73B35A /* LibraryFolderSyncTests.swift */; };
+		51338DB7CA0550158120D4DE /* LibraryFolderSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D87EEECB9F5F0880DE73B35A /* LibraryFolderSyncTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		A09C0830D85E1AB7D09D4795 = {isa = PBXContainerItemProxy; containerPortal = A60000000000000000000001; proxyType = 1; remoteGlobalIDString = A50000000000000000000001; remoteInfo = PageKeep; };
 		7290BD71ED06E84748F7E070 = {isa = PBXContainerItemProxy; containerPortal = A60000000000000000000001; proxyType = 1; remoteGlobalIDString = A50000000000000000000001; remoteInfo = PageKeep; };
+		58EB0A6AD30E4EFC890CEEED /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A60000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FF2DC5B59D563B0258549A6B;
+			remoteInfo = PageKeepMac;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -102,6 +159,27 @@
 		BBC918DF4F64B4507E761F7E /* LibraryFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryFiles.swift; sourceTree = "<group>"; };
 		1FBBB42529C6FCCF31CD322C /* AcquisitionModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcquisitionModelTests.swift; sourceTree = "<group>"; };
 		27983FA4AC96C9296A7F403D /* NotebookPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookPresentationTests.swift; sourceTree = "<group>"; };
+		0A4D3FAC5E803BAC939EBEA0 /* LibrarySync.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibrarySync.swift; sourceTree = "<group>"; };
+		15C0D5580AC062A9B1D6E29B /* ReadingPositionStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ReadingPositionStore.swift; sourceTree = "<group>"; };
+		280D3465FCD85D98FE69F574 /* SyncSettingsSection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyncSettingsSection.swift; sourceTree = "<group>"; };
+		2CCD1226A1764FC1BF977326 /* MacPDFReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacPDFReader.swift; sourceTree = "<group>"; };
+		3F62E6F05C2D0C1B67CA17B6 /* MacFileActions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacFileActions.swift; sourceTree = "<group>"; };
+		4CED3D1CEA8D0899307CEBF6 /* PageKeep.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PageKeep.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		622BD846ADC09214BEA1C347 /* MacContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacContentView.swift; sourceTree = "<group>"; };
+		7DC047F7CF228F6EACB5C2AD /* MacDraftProtection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacDraftProtection.swift; sourceTree = "<group>"; };
+		82E116816ACA216463F6B30E /* MacNotebookEditor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacNotebookEditor.swift; sourceTree = "<group>"; };
+		93A80E09AD1851743C42956B /* ReadingPositionStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ReadingPositionStoreTests.swift; sourceTree = "<group>"; };
+		B893F64CF995B999D62EC1C6 /* LibraryScaleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibraryScaleTests.swift; sourceTree = "<group>"; };
+		C31B547526BB2FF8E028E4D7 /* CloudSyncCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudSyncCoordinator.swift; sourceTree = "<group>"; };
+		CA803B4D7236570584F689D8 /* CloudKitTransport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudKitTransport.swift; sourceTree = "<group>"; };
+		D7694E53768EC635B6BAF8C9 /* LibrarySyncTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibrarySyncTests.swift; sourceTree = "<group>"; };
+		DCDF8965A33B0317C4686328 /* MacPlatformTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacPlatformTests.swift; sourceTree = "<group>"; };
+		E4C69F8C408057C2621742F6 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.15.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		E84B7AFFA1ABECF023B95CE3 /* PageKeepMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PageKeepMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF400239F8A827B4B6625D65 /* CloudSyncCoordinatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudSyncCoordinatorTests.swift; sourceTree = "<group>"; };
+		7BC9E31E4DBC98BD6583D72B /* FolderControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderControls.swift; sourceTree = "<group>"; };
+		EED2CFADF7C8DDF9957C35EF /* LibraryFolderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryFolderTests.swift; sourceTree = "<group>"; };
+		D87EEECB9F5F0880DE73B35A /* LibraryFolderSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryFolderSyncTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -126,6 +204,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		38533CC0671BB3526B30965F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A16E61D4711ABA588BA1C101 /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FAB140FDB6D7CC6DC4357620 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				09A1B793645876F13DD17807 /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -133,11 +227,10 @@
 			isa = PBXGroup;
 			children = (
 				97F584C5A214C33E352EB687 /* PageKeepUITests */,
-
 				D3750578691A2E97EFCCC77E /* PageKeepTests */,
-
 				A40000000000000000000002 /* PageKeep */,
 				A40000000000000000000003 /* Products */,
+				D5EC587B4EABA1F00BDA75F7 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -161,31 +254,31 @@
 				A5163DE02B6DB92A71F1F25E /* DraftDismissalGuard.swift */,
 				52365AF304208CCD2B138036 /* AppSettings.swift */,
 				C1437C6C51F689678B3383DE /* ShareSheet.swift */,
-
 				BB2C4AAD5A43C12BBDC4A75B /* PageThumbnail.swift */,
-
 				94562A9758E276F8206C73CD /* PageManagementView.swift */,
-
 				6916B6623B0BBCA3D2D72053 /* PDFReader.swift */,
-
 				9DA2871AAFCA589256CDD057 /* NotebookView.swift */,
-
 				7D188E4F823F385E58FF41CE /* LibraryRepository.swift */,
-
 				4311AD92454479B2C8C912C6 /* AcquisitionView.swift */,
-
 				72E11ADCD486A882707E08ED /* ScanProcessor.swift */,
-
 				1067B42F2CF571DBF2A53825 /* PDFService.swift */,
-
 				23198A15BFDAF15735C0AE71 /* LibraryStore.swift */,
-
 				08123BA5ED7B2CE83FFAAB71 /* DocumentScanner.swift */,
-
 				A20000000000000000000001 /* PageKeepApp.swift */,
 				A20000000000000000000002 /* ContentView.swift */,
 				A20000000000000000000003 /* Notebook.swift */,
 				A20000000000000000000004 /* Assets.xcassets */,
+				15C0D5580AC062A9B1D6E29B /* ReadingPositionStore.swift */,
+				0A4D3FAC5E803BAC939EBEA0 /* LibrarySync.swift */,
+				622BD846ADC09214BEA1C347 /* MacContentView.swift */,
+				82E116816ACA216463F6B30E /* MacNotebookEditor.swift */,
+				2CCD1226A1764FC1BF977326 /* MacPDFReader.swift */,
+				3F62E6F05C2D0C1B67CA17B6 /* MacFileActions.swift */,
+				7DC047F7CF228F6EACB5C2AD /* MacDraftProtection.swift */,
+				C31B547526BB2FF8E028E4D7 /* CloudSyncCoordinator.swift */,
+				CA803B4D7236570584F689D8 /* CloudKitTransport.swift */,
+				280D3465FCD85D98FE69F574 /* SyncSettingsSection.swift */,
+				7BC9E31E4DBC98BD6583D72B /* FolderControls.swift */,
 			);
 			path = PageKeep;
 			sourceTree = "<group>";
@@ -194,10 +287,10 @@
 			isa = PBXGroup;
 			children = (
 				0B81329F859FF6759E0A59BA /* PageKeepUITests.xctest */,
-
 				36378ECB7B36CD7A0EEE0507 /* PageKeepTests.xctest */,
-
 				A20000000000000000000005 /* PageKeep.app */,
+				4CED3D1CEA8D0899307CEBF6 /* PageKeep.app */,
+				E84B7AFFA1ABECF023B95CE3 /* PageKeepMacTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -214,9 +307,14 @@
 				553570C4FB30708708EA8F07 /* ReaderSettingsTests.swift */,
 				9450CF68E91C9F9DF8D14384 /* NotebookNamingTests.swift */,
 				6976E531772C18DCD9BD714F /* LibraryRepositoryTests.swift */,
-
 				66FE4AF8C85033EB5D530044 /* LargeNotebookTests.swift */,
-
+				93A80E09AD1851743C42956B /* ReadingPositionStoreTests.swift */,
+				D7694E53768EC635B6BAF8C9 /* LibrarySyncTests.swift */,
+				B893F64CF995B999D62EC1C6 /* LibraryScaleTests.swift */,
+				DCDF8965A33B0317C4686328 /* MacPlatformTests.swift */,
+				EF400239F8A827B4B6625D65 /* CloudSyncCoordinatorTests.swift */,
+				EED2CFADF7C8DDF9957C35EF /* LibraryFolderTests.swift */,
+				D87EEECB9F5F0880DE73B35A /* LibraryFolderSyncTests.swift */,
 			);
 			path = PageKeepTests;
 			sourceTree = "<group>";
@@ -228,6 +326,22 @@
 
 			);
 			path = PageKeepUITests;
+			sourceTree = "<group>";
+		};
+		4CDEC097753652BC2BC5A904 /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				E4C69F8C408057C2621742F6 /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
+		D5EC587B4EABA1F00BDA75F7 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				4CDEC097753652BC2BC5A904 /* OS X */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -252,6 +366,41 @@
 		};
 		F62B7727C7D38C197BDD771D /* PageKeepTests */ = {isa = PBXNativeTarget; buildConfigurationList = 488F0775FA3DA368BCD65B56; buildPhases = (A31440CBC2563CAFA2E63360, 7AC34610E1CAB7533E63B5B4, 8295E00B35633DF91FDD0C11,); buildRules = (); dependencies = (F189DD8F3549F9437BF41C02,); name = PageKeepTests; productName = PageKeepTests; productReference = 36378ECB7B36CD7A0EEE0507; productType = "com.apple.product-type.bundle.unit-test"; };
 		0F594CB084F2970FE114EA5E /* PageKeepUITests */ = {isa = PBXNativeTarget; buildConfigurationList = 2921298414B704942B2A242C; buildPhases = (E43A4C14CCCDAE9C80783473, 5B0F372D2D8C7FA6CB2BCE19, 5FD73112DF8FFEDE3CE9EFD5,); buildRules = (); dependencies = (E07FD1011B69B2D36194C3DC,); name = PageKeepUITests; productName = PageKeepUITests; productReference = 0B81329F859FF6759E0A59BA; productType = "com.apple.product-type.bundle.ui-testing"; };
+		32D03ED6ED2D2E8E8F8CA26B /* PageKeepMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 644F3BBA714F162052E4F19C /* Build configuration list for PBXNativeTarget "PageKeepMacTests" */;
+			buildPhases = (
+				46BC79EACA253754C81B706D /* Sources */,
+				FAB140FDB6D7CC6DC4357620 /* Frameworks */,
+				5BDA3C53198237421C742D97 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				91891CBAE136D6010833448B /* PBXTargetDependency */,
+			);
+			name = PageKeepMacTests;
+			productName = PageKeepMacTests;
+			productReference = E84B7AFFA1ABECF023B95CE3 /* PageKeepMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		FF2DC5B59D563B0258549A6B /* PageKeepMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E84751981528446913ED5341 /* Build configuration list for PBXNativeTarget "PageKeepMac" */;
+			buildPhases = (
+				A14EE1757AAF8F7E9F96A666 /* Sources */,
+				38533CC0671BB3526B30965F /* Frameworks */,
+				0197C3F7919066DA4AD7827C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PageKeepMac;
+			productName = PageKeep;
+			productReference = 4CED3D1CEA8D0899307CEBF6 /* PageKeep.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -283,6 +432,8 @@
 				0F594CB084F2970FE114EA5E /* PageKeepUITests */,
 				F62B7727C7D38C197BDD771D /* PageKeepTests */,
 				A50000000000000000000001 /* PageKeep */,
+				FF2DC5B59D563B0258549A6B /* PageKeepMac */,
+				32D03ED6ED2D2E8E8F8CA26B /* PageKeepMacTests */,
 			);
 		};
 /* End PBXProject section */
@@ -304,6 +455,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		5FD73112DF8FFEDE3CE9EFD5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0197C3F7919066DA4AD7827C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5BDA3C53198237421C742D97 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -347,6 +512,12 @@
 				A10000000000000000000001 /* PageKeepApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* Notebook.swift in Sources */,
+				FF1B553059601E1803430A6A /* ReadingPositionStore.swift in Sources */,
+				4CF43C0D0798B26843DEF6FD /* LibrarySync.swift in Sources */,
+				150AD76E995EEB03A1BCCFAD /* CloudSyncCoordinator.swift in Sources */,
+				6A752C98A6B7231B8BAFF0F2 /* CloudKitTransport.swift in Sources */,
+				FCF305F739318292E71FB1EC /* SyncSettingsSection.swift in Sources */,
+				4453D46D974FF6BC8083E56D /* FolderControls.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -364,6 +535,12 @@
 				EAAEAEA8017631D56015A656 /* NotebookNamingTests.swift in Sources */,
 				C58F5DC039684EFB8DBDB289 /* LibraryRepositoryTests.swift in Sources */,
 				D8B9744372B11FA8604FC1A6 /* LargeNotebookTests.swift in Sources */,
+				7ED627770EF7489F4428B410 /* ReadingPositionStoreTests.swift in Sources */,
+				BD73087DF2C6E419491E34CD /* LibrarySyncTests.swift in Sources */,
+				4F7FC610FEE7049B85CFF410 /* LibraryScaleTests.swift in Sources */,
+				5F305BEE38BC963049E66985 /* CloudSyncCoordinatorTests.swift in Sources */,
+				63DF80CA64A6E445BE2F3373 /* LibraryFolderTests.swift in Sources */,
+				5DEF343C96EFA29DE355926D /* LibraryFolderSyncTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -375,11 +552,67 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		46BC79EACA253754C81B706D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2E4BD3C4B740F584855C5A0A /* NotebookNamingTests.swift in Sources */,
+				35D7C202709EA4E246A2D29B /* NotebookSearchTests.swift in Sources */,
+				9FEEC6DBDCCB343E1F3D43A4 /* NotebookDraftTests.swift in Sources */,
+				2FA653994A5422C7F4A11162 /* DraftPagePreviewSourceTests.swift in Sources */,
+				16DFC687A9AC1725F16FF867 /* ReadingPositionStoreTests.swift in Sources */,
+				E29A7E55BFAD7D489D20C08A /* LibrarySyncTests.swift in Sources */,
+				3C9030CFA5824337514296A3 /* LibraryScaleTests.swift in Sources */,
+				C082E9183CD23BFFC7BB19A3 /* ReaderSettingsTests.swift in Sources */,
+				A2758D93FDDD15BD139D7D1D /* LibraryRepositoryTests.swift in Sources */,
+				AA8613282F9B9E13EB02CD68 /* MacPlatformTests.swift in Sources */,
+				69F85236D885EEBD16EDB346 /* CloudSyncCoordinatorTests.swift in Sources */,
+				BAAA79015AA3E875DEA28AD2 /* LibraryFolderTests.swift in Sources */,
+				51338DB7CA0550158120D4DE /* LibraryFolderSyncTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A14EE1757AAF8F7E9F96A666 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				853092C89329EA3C50457AE9 /* PageKeepApp.swift in Sources */,
+				3156A52FE0DE672839251E08 /* Notebook.swift in Sources */,
+				0F3195EB34227929BAB80A4F /* LibraryFiles.swift in Sources */,
+				E8E1533C40CCADF0938F858C /* LibraryRepository.swift in Sources */,
+				943D828F3465056F45C304C3 /* LibraryStore.swift in Sources */,
+				6620ECB36C8A9CAE6D8DD036 /* PDFService.swift in Sources */,
+				7B94E7FDC34D0F013A36B22C /* NotebookDraft.swift in Sources */,
+				F93BE46E297DC9B48FEF7A2C /* DraftPagePreviewSource.swift in Sources */,
+				03B50881F1489E9F2D6C7F1F /* AppSettings.swift in Sources */,
+				A2D078FCCA32B3A18B4467EE /* NotebookSearch.swift in Sources */,
+				68DAACDEB0917A7421A9AF16 /* NotebookNaming.swift in Sources */,
+				6E6449EF5420D4B3B0BD5C97 /* NotebookAppearance.swift in Sources */,
+				0A939D0DD9A83CC4DB3D94A2 /* ReadingPositionStore.swift in Sources */,
+				48673371B1047CC2DCB88736 /* LibrarySync.swift in Sources */,
+				9D3C8AB488CB843D4CE8B5DC /* MacContentView.swift in Sources */,
+				FACEDA09AC68C2AAD20F6E45 /* MacNotebookEditor.swift in Sources */,
+				E7966AA502B5EF8E8DD818A1 /* MacPDFReader.swift in Sources */,
+				39494886B3A7DB4B92E59DB6 /* MacFileActions.swift in Sources */,
+				31A7EAE0E655FD5F0F8985BF /* MacDraftProtection.swift in Sources */,
+				F86FF575A2A548A473AF4A51 /* CloudSyncCoordinator.swift in Sources */,
+				F5895FA1B668810FD10B1233 /* CloudKitTransport.swift in Sources */,
+				09C49A14E4F610428D3266AA /* SyncSettingsSection.swift in Sources */,
+				9FE8387AFF0D9776A2D748BA /* FolderControls.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
 		F189DD8F3549F9437BF41C02 = {isa = PBXTargetDependency; target = A50000000000000000000001; targetProxy = A09C0830D85E1AB7D09D4795; };
 		E07FD1011B69B2D36194C3DC = {isa = PBXTargetDependency; target = A50000000000000000000001; targetProxy = 7290BD71ED06E84748F7E070; };
+		91891CBAE136D6010833448B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PageKeepMac;
+			target = FF2DC5B59D563B0258549A6B /* PageKeepMac */;
+			targetProxy = 58EB0A6AD30E4EFC890CEEED /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -477,8 +710,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PageKeep/iOSInfo.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "PageKeep uses the camera to scan notebook pages.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -507,8 +740,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PageKeep/iOSInfo.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "PageKeep uses the camera to scan notebook pages.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -532,6 +765,96 @@
 		A53233212D0FFB7B79ACF047 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.lukecollins.PageKeepTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PageKeep.app/PageKeep"; }; name = Release; };
 		8FB6E0159EB362CFF2DF6348 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.lukecollins.PageKeepUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TEST_TARGET_NAME = PageKeep; }; name = Debug; };
 		18248D0A7B2850F150653600 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.lukecollins.PageKeepUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TEST_TARGET_NAME = PageKeep; }; name = Release; };
+		53F556D44441814E795880DF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lukecollins.PageKeepMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PageKeep.app/Contents/MacOS/PageKeep";
+			};
+			name = Debug;
+		};
+		AA178AE21C5D438A3FC3D0C1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lukecollins.PageKeepMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PageKeep.app/Contents/MacOS/PageKeep";
+			};
+			name = Release;
+		};
+		AE864BAE22D30D8E01F77EC1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PageKeep/Mac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = PageKeep;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lukecollins.PageKeepMac;
+				PRODUCT_MODULE_NAME = PageKeep;
+				PRODUCT_NAME = PageKeep;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B00C30B53C608F1923D48DCE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PageKeep/Mac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = PageKeep;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lukecollins.PageKeepMac;
+				PRODUCT_MODULE_NAME = PageKeep;
+				PRODUCT_NAME = PageKeep;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -555,6 +878,24 @@
 		};
 		488F0775FA3DA368BCD65B56 = {isa = XCConfigurationList; buildConfigurations = (D825B258FD7918C04E9293A6, A53233212D0FFB7B79ACF047,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		2921298414B704942B2A242C = {isa = XCConfigurationList; buildConfigurations = (8FB6E0159EB362CFF2DF6348, 18248D0A7B2850F150653600,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		644F3BBA714F162052E4F19C /* Build configuration list for PBXNativeTarget "PageKeepMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA178AE21C5D438A3FC3D0C1 /* Release */,
+				53F556D44441814E795880DF /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E84751981528446913ED5341 /* Build configuration list for PBXNativeTarget "PageKeepMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AE864BAE22D30D8E01F77EC1 /* Release */,
+				B00C30B53C608F1923D48DCE /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 	};
 	rootObject = A60000000000000000000001 /* Project object */;

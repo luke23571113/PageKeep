@@ -6,11 +6,15 @@ import Observation
 final class LibraryStore {
     let repository: LibraryRepository
     private(set) var notebooks: [Notebook] = []
+    private(set) var folders: [NotebookFolder] = []
+    private var itemOrder: [UUID] = []
     private(set) var notebookErrors: [UUID: String] = [:]
     private(set) var isLoading = true
     private(set) var isBusy = false
     private(set) var loadError: String?
     private(set) var canRecover = false
+    private(set) var syncNotices: [LibrarySyncNotice] = []
+    private(set) var pendingSyncCount = 0
     private var hasLoaded = false
 
     init(repository: LibraryRepository = LibraryRepository()) {
@@ -59,6 +63,52 @@ final class LibraryStore {
     var activeNotebooks: [Notebook] { notebooks.filter { !$0.isArchived } }
     var archivedNotebooks: [Notebook] { notebooks.filter(\.isArchived) }
 
+    var rootItems: [LibraryItem] {
+        let folderItems = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, LibraryItem.folder($0)) })
+        let notebookItems = Dictionary(uniqueKeysWithValues: notebooks(in: nil).map { ($0.id, LibraryItem.notebook($0)) })
+        return itemOrder.compactMap { folderItems[$0] ?? notebookItems[$0] }
+    }
+
+    func notebooks(in folderID: UUID?) -> [Notebook] {
+        let matches = Dictionary(uniqueKeysWithValues: notebooks.filter {
+            !$0.isArchived && effectiveFolderID(for: $0) == folderID
+        }.map { ($0.id, $0) })
+        return itemOrder.compactMap { matches[$0] }
+    }
+
+    func folder(id: UUID) -> NotebookFolder? { folders.first { $0.id == id } }
+
+    func effectiveFolderID(for notebook: Notebook) -> UUID? {
+        guard let id = notebook.folderID, folder(id: id) != nil else { return nil }
+        return id
+    }
+
+    func folderName(for notebook: Notebook) -> String? {
+        effectiveFolderID(for: notebook).flatMap { folder(id: $0)?.name }
+    }
+
+    func createFolder(name: String) async throws -> UUID {
+        let id = UUID()
+        try await perform { try await repository.createFolder(id: id, name: name) }
+        return id
+    }
+
+    func renameFolder(_ id: UUID, name: String) async throws {
+        try await perform { try await repository.renameFolder(id, name: name) }
+    }
+
+    func deleteFolder(_ id: UUID) async throws {
+        try await perform { try await repository.deleteFolder(id) }
+    }
+
+    func moveNotebook(_ id: UUID, toFolderID folderID: UUID?) async throws {
+        try await perform { try await repository.moveNotebook(id, toFolderID: folderID) }
+    }
+
+    func reorderItems(inFolderID folderID: UUID?, orderedIDs: [UUID]) async throws {
+        try await perform { try await repository.reorderItems(inFolderID: folderID, orderedIDs: orderedIDs) }
+    }
+
     func notebook(id: UUID) -> Notebook? {
         notebooks.first { $0.id == id }
     }
@@ -72,15 +122,20 @@ final class LibraryStore {
         notebookID: UUID?,
         additions: [PreparedPDF],
         pageLayout: [DraftPage]? = nil,
-        expectedExistingPageIDs: [UUID]? = nil
+        expectedExistingPageIDs: [UUID]? = nil,
+        baseNotebook: Notebook? = nil, basePDFURL: URL? = nil, draftVersionID: UUID? = nil
     ) async throws -> SavedNotebook {
         let id = notebookID ?? UUID()
+        var savedID = id
         try await perform {
             if notebookID != nil {
-                return try await repository.edit(
+                let result = try await repository.edit(
                     id, details: details, appending: additions, pageLayout: pageLayout,
-                    expectedExistingPageIDs: expectedExistingPageIDs
+                    expectedExistingPageIDs: expectedExistingPageIDs, baseNotebook: baseNotebook,
+                    basePDFURL: basePDFURL, draftVersionID: draftVersionID
                 )
+                savedID = result.savedNotebookID ?? id
+                return result
             }
             return try await repository.create(id: id, details: details, from: additions, pageLayout: pageLayout)
         }
@@ -91,10 +146,10 @@ final class LibraryStore {
                 if case .prepared = $0.source { return true }
                 return false
             }?.id
-        } else if addedCount > 0, let saved = notebook(id: id) {
+        } else if addedCount > 0, let saved = notebook(id: savedID) {
             firstAddedPageID = saved.pages[saved.pageCount - addedCount].id
         }
-        return SavedNotebook(notebookID: id, firstAddedPageID: firstAddedPageID)
+        return SavedNotebook(notebookID: savedID, firstAddedPageID: firstAddedPageID)
     }
 
     func reorderNotebooks(orderedActiveIDs: [UUID]) async throws {
@@ -130,6 +185,26 @@ final class LibraryStore {
         try await perform { try await repository.deletePages(in: id, ids: ids) }
     }
 
+    func applyRemote(_ manifest: LibraryManifest, downloadedPDFs: [UUID: URL]) async throws {
+        try await perform { try await repository.reconcile(with: manifest, downloadedPDFs: downloadedPDFs) }
+    }
+
+    func acknowledgeSyncEntries(_ ids: Set<UUID>) async throws {
+        try await perform { try await repository.acknowledgeSyncEntries(ids) }
+    }
+
+    func prepareForSync() async throws {
+        try await perform { try await repository.prepareForSync() }
+    }
+
+    func resetSyncForNewAccount() async throws {
+        try await perform { try await repository.resetSyncForNewAccount() }
+    }
+
+    func dismissSyncNotice(_ id: UUID) async throws {
+        try await perform { try await repository.dismissSyncNotice(id) }
+    }
+
     func shareCopy(of id: UUID) async throws -> URL {
         guard !isBusy else { throw LibraryActionError.busy }
         isBusy = true
@@ -146,7 +221,11 @@ final class LibraryStore {
 
     private func update(_ snapshot: LibrarySnapshot) {
         notebooks = snapshot.manifest.notebooks
+        folders = snapshot.manifest.folders
+        itemOrder = snapshot.manifest.itemOrder
         notebookErrors = snapshot.notebookErrors
+        syncNotices = snapshot.manifest.sync.notices
+        pendingSyncCount = snapshot.manifest.sync.outbox.count
     }
 }
 

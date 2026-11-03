@@ -30,6 +30,11 @@ struct ArchiveView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(notebook.name).foregroundStyle(.primary)
                                     Text(notebook.pageCountLabel).font(.subheadline).foregroundStyle(.secondary)
+                                    if let folderName = store.folderName(for: notebook) {
+                                        Label(folderName, systemImage: "folder")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                             .padding(.vertical, 4)
